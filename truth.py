@@ -1,0 +1,103 @@
+import pandas as pd
+import numpy as np
+from dataclasses import dataclass, field
+from pathlib import Path
+from sklearn.model_selection import train_test_split
+
+
+NO_EDITING_CUTOFF = 0.05
+
+
+@dataclass
+class EmergeCNNPaths:
+    data_dir: Path
+    screen_name: str
+
+    screen_path: Path = field(init=False)
+    train_path: Path = field(init=False)
+    val_path: Path = field(init=False)
+    test_path: Path = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.data_dir = Path(self.data_dir)
+
+        self.screen_path = self.data_dir / f"{self.screen_name}.csv"
+        self.train_path = self.data_dir / f"{self.screen_name}_train_idx.csv"
+        self.val_path = self.data_dir / f"{self.screen_name}_val_idx.csv"
+        self.test_path = self.data_dir / f"{self.screen_name}_test_idx.csv"
+
+        if not self.screen_path.is_file():
+            raise FileNotFoundError(
+                f"Screen file does not exist: {self.screen_path}"
+            )
+
+
+def splits_exist(paths: EmergeCNNPaths) -> bool:
+    return (
+        paths.train_path.is_file()
+        and paths.test_path.is_file()
+        and paths.val_path.is_file()
+    )
+
+def make_splits(
+    df: pd.DataFrame,
+    paths: EmergeCNNPaths,
+    seed: int = 42,
+    force_regenerate: bool = False
+) -> None:
+    if splits_exist(paths) and not force_regenerate:
+        return
+
+    def split_df(df: pd.DataFrame) -> tuple[pd.Index, pd.Index, pd.Index]:
+        train, remain = train_test_split(df, test_size=0.2, random_state=seed)
+        test, val = train_test_split(remain, test_size=0.5, random_state=seed)
+        return train.index, val.index, test.index
+
+    pos = split_df(df[df["mle"] > NO_EDITING_CUTOFF])
+    zer = split_df(df[df["mle"] <= NO_EDITING_CUTOFF])
+    train_idx = pos[0].append(zer[0])
+    val_idx = pos[1].append(zer[1])
+    test_idx = pos[2].append(zer[2])
+
+    rng = np.random.default_rng(seed)
+    train_idx = pd.Index(rng.permutation(train_idx))
+    val_idx = pd.Index(rng.permutation(val_idx))
+    test_idx = pd.Index(rng.permutation(test_idx))
+
+    assert len(set(train_idx) & set(val_idx)) == 0
+    assert len(set(train_idx) & set(test_idx)) == 0
+    assert len(set(val_idx) & set(test_idx)) == 0
+    assert len(train_idx) + len(val_idx) + len(test_idx) == len(df)
+
+    pd.Series(train_idx, name="idx").to_csv(paths.train_path, index=False)
+    pd.Series(val_idx, name="idx").to_csv(paths.val_path, index=False)
+    pd.Series(test_idx, name="idx").to_csv(paths.test_path, index=False)
+
+def load_train_val(
+    paths: EmergeCNNPaths,
+    seed: int = 42,
+    force_regenerate: bool = False
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    df = pd.read_csv(paths.screen_path, usecols=["5to3", "n", "k", "mle"])
+    if not splits_exist(paths) or force_regenerate:
+        make_splits(df, paths, seed=seed, force_regenerate=force_regenerate)
+
+    train_idx = pd.read_csv(paths.train_path)["idx"]
+    train_df = df.loc[train_idx]
+    val_idx = pd.read_csv(paths.val_path)["idx"]
+    val_df = df.loc[val_idx]
+    return train_df, val_df
+
+def load_test(
+    paths: EmergeCNNPaths,
+    seed: int = 42,
+    force_regenerate: bool = False
+) -> pd.DataFrame:
+    df = pd.read_csv(paths.screen_path, usecols=["5to3", "n", "k", "mle"])
+    if not splits_exist(paths) or force_regenerate:
+        make_splits(df, paths, seed=seed, force_regenerate=force_regenerate)
+
+    test_idx = pd.read_csv(paths.test_path)["idx"]
+    test_df = df.loc[test_idx]
+    return test_df
+
