@@ -3,7 +3,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 from pathlib import Path
 
-from core import calculate_loss
+from losses import calculate_betabinom_loss
 
 
 def train_one_epoch(
@@ -25,7 +25,7 @@ def train_one_epoch(
     for step, batch in enumerate(progress, start=1):
         optimizer.zero_grad()
         forward = model(batch["sequence"])
-        loss = calculate_loss(
+        loss = calculate_betabinom_loss(
             batch["k"],
             batch["n"],
             forward["pi"],

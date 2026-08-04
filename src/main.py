@@ -1,13 +1,10 @@
 from pathlib import Path
 import torch
 
-from truth import EmergeCNNPaths, load_train_val
-from core import EmergeDataset
+from truth import EmergeCNNPaths, EmergeDataset, load_train_val
 from training import fit_model
-from encoders.one_hot import Features
-from convs.one_layer import OneLayerConv
-from heads.dense_heads import DenseHeads
-from pipelines.one_conv_dense_model.model import OneConvDenseModel
+from blocks import OneHotFeats, OneLayerConv, DenseHeads
+from model import OneConvDenseModel
 
 
 NUM_FILTERS = 32
@@ -20,7 +17,7 @@ VAL_BATCH_SIZE   = 128
 
 
 def main():
-    paths = EmergeCNNPaths(data_dir=Path("data"), screen_name="r255x")
+    paths = EmergeCNNPaths(screen_name="r255x")
     train_df, val_df = load_train_val(paths)
 
     train_data = EmergeDataset(df=train_df)
@@ -33,7 +30,7 @@ def main():
     )
 
     model = OneConvDenseModel(
-        encoder_block=Features(),
+        encoder_block=OneHotFeats(),
         conv_block=OneLayerConv(
             num_filters=NUM_FILTERS, kernel_size=KERNEL_SIZE
         ),

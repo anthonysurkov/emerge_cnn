@@ -1,28 +1,4 @@
-import pandas as pd
 import torch
-
-
-NT_MAP = {"A": 0, "C": 1, "G": 2, "U": 3, "T": 3}
-
-
-class EmergeDataset(torch.utils.data.Dataset):
-    def __init__(self, df: pd.DataFrame):
-        self.df = df.reset_index(drop=True)
-
-    def __len__(self):
-        return len(self.df)
-
-    def __getitem__(self, index):
-        row = self.df.iloc[index]
-        sequence = torch.tensor(
-            [NT_MAP[char] for char in row["5to3"]],
-            dtype=torch.long
-        )
-        n = torch.tensor(row["n"], dtype=torch.float32)
-        k = torch.tensor(row["k"], dtype=torch.float32)
-        mle = torch.tensor(row["mle"], dtype=torch.float32)
-
-        return {"sequence": sequence, "n": n, "k": k, "mle": mle}
 
 
 def log_choose(n: torch.Tensor, k: torch.Tensor) -> torch.Tensor:
@@ -47,7 +23,7 @@ def betabinom_logprob(
         - log_beta(alpha, beta)
     )
 
-def calculate_loss(
+def calculate_betabinom_loss(
     k: torch.Tensor,
     n: torch.Tensor,
     pi: torch.Tensor,

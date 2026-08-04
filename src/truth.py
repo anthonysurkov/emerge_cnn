@@ -1,18 +1,42 @@
 import pandas as pd
 import numpy as np
+import torch
 from dataclasses import dataclass, field
 from pathlib import Path
 from sklearn.model_selection import train_test_split
 
+from paths import DATA_DIR
+
 
 NO_EDITING_CUTOFF = 0.05
+NT_MAP = {"A": 0, "C": 1, "G": 2, "U": 3, "T": 3}
+
+
+class EmergeDataset(torch.utils.data.Dataset):
+    def __init__(self, df: pd.DataFrame):
+        self.df = df.reset_index(drop=True)
+
+    def __len__(self):
+        return len(self.df)
+
+    def __getitem__(self, index):
+        row = self.df.iloc[index]
+        sequence = torch.tensor(
+            [NT_MAP[char] for char in row["5to3"]],
+            dtype=torch.long
+        )
+        n = torch.tensor(row["n"], dtype=torch.float32)
+        k = torch.tensor(row["k"], dtype=torch.float32)
+        mle = torch.tensor(row["mle"], dtype=torch.float32)
+
+        return {"sequence": sequence, "n": n, "k": k, "mle": mle}
 
 
 @dataclass
 class EmergeCNNPaths:
-    data_dir: Path
     screen_name: str
 
+    data_dir: Path = DATA_DIR
     screen_path: Path = field(init=False)
     train_path: Path = field(init=False)
     val_path: Path = field(init=False)
