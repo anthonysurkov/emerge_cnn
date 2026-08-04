@@ -1,7 +1,7 @@
 from pathlib import Path
 import yaml
 
-with open("../config.yaml") as f:
+with open("config.yaml") as f:
     cfg = yaml.safe_load(f)
 
 # config.yaml root

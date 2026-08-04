@@ -1,10 +1,10 @@
 from pathlib import Path
 import torch
 
-from truth import EmergeCNNPaths, EmergeDataset, load_train_val
-from training import fit_model
-from blocks import OneHotFeats, OneLayerConv, DenseHeads
-from model import OneConvDenseModel
+from .truth import EmergeCNNPaths, EmergeDataset, load_train_val
+from .training import fit_model
+from .blocks import OneHotFeats, OneLayerConv, DenseHeads
+from .model import OneConvDenseModel
 
 
 NUM_FILTERS = 32
@@ -17,6 +17,13 @@ VAL_BATCH_SIZE   = 128
 
 
 def main():
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+    elif torch.backends.mps.is_available():
+        device = torch.device("mps")
+    else:
+        device = torch.device("cpu")
+
     paths = EmergeCNNPaths(screen_name="r255x")
     train_df, val_df = load_train_val(paths)
 
@@ -37,6 +44,7 @@ def main():
         heads_block=DenseHeads(NUM_FILTERS * (SEQ_LENGTH - KERNEL_SIZE + 1)),
         phi_init = PHI_INIT
     )
+    model.to(device)
     optimizer = torch.optim.Adam(
         model.parameters(),
         lr=1e-3

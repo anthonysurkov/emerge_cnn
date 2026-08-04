@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from sklearn.model_selection import train_test_split
 
-from paths import DATA_DIR
+from .paths import DATA_DIR
 
 
 NO_EDITING_CUTOFF = 0.05

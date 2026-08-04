@@ -3,7 +3,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 from pathlib import Path
 
-from losses import calculate_betabinom_loss
+from .losses import calculate_betabinom_loss
 
 
 def train_one_epoch(
@@ -16,6 +16,7 @@ def train_one_epoch(
     model.train()
     losses = []
 
+    device = next(model.parameters()).device
     progress = tqdm(
         train_loader,
         desc="Training epoch",
@@ -23,6 +24,11 @@ def train_one_epoch(
         disable=not verbose
     )
     for step, batch in enumerate(progress, start=1):
+        batch = {
+            name: tensor.to(device)
+            for name, tensor in batch.items()
+        }
+
         optimizer.zero_grad()
         forward = model(batch["sequence"])
         loss = calculate_betabinom_loss(
@@ -55,6 +61,7 @@ def val_one_epoch(
     model.eval()
     losses = []
 
+    device = next(model.parameters()).device
     progress = tqdm(
         val_loader,
         desc="Validating epoch",
@@ -63,6 +70,11 @@ def val_one_epoch(
     )
     with torch.no_grad():
         for batch in progress:
+            batch = {
+                name: tensor.to(device)
+                for name, tensor in batch.items()
+            }
+
             forward = model(batch["sequence"])
             loss = calculate_loss(
                 batch["k"],
@@ -129,7 +141,7 @@ def fit_model(
                 "train_loss": train_loss,
                 "val_loss": val_loss,
                 "concentration": phi,
-                "overdisperson": psi
+                "overdispersion": psi
                 }, checkpoint_path
             )
         else:
@@ -138,7 +150,11 @@ def fit_model(
         if epochs_without_improvement >= patience:
             break
 
-    checkpoint = torch.load(checkpoint_path, weights_only=True)
+    checkpoint = torch.load(
+        checkpoint_path,
+        map_location=next(model.parameters()).device,
+        weights_only=True
+    )
     model.load_state_dict(checkpoint["model_state_dict"])
     optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
 
