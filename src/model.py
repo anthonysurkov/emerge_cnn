@@ -1,7 +1,7 @@
 import torch
 
 
-class OneConvDenseModel(torch.nn.Module):
+class ConvModelFramework(torch.nn.Module):
     def __init__(self, encoder_block, conv_block, heads_block, phi_init):
         super().__init__()
         self.encoder_block = encoder_block

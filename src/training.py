@@ -4,7 +4,22 @@ from tqdm import tqdm
 from pathlib import Path
 
 from .losses import calculate_betabinom_loss
+from .truth import EmergeCNNPaths, EmergeDataset, load_train_val
+from .model import ConvModelFramework
 
+
+def check_finite_gradients(model: torch.nn.Module) -> None:
+    bad_params = []
+    for name, param in model.named_parameters():
+        if param.grad is None:
+            continue
+        if not torch.isfinite(param.grad).all().item():
+            bad_params.append(name)
+    if bad_params:
+        names = ", ".join(bad_params)
+        raise FloatingPointError(
+            f"Non-finite gradients detected in: {names}"
+        )
 
 def train_one_epoch(
     model,
@@ -38,8 +53,15 @@ def train_one_epoch(
             forward["mu"],
             forward["phi"]
         )
+        if not torch.isfinite(loss).item():
+            raise FloatingPointError(
+                f"Non-finite training loss at step {step}: {loss.item()}"
+            )
+
         loss.backward()
+        check_finite_gradients(model)
         optimizer.step()
+
         losses.append({
             "loss": loss.item() * batch["sequence"].shape[0],
             "length": batch["sequence"].shape[0]
@@ -76,13 +98,18 @@ def val_one_epoch(
             }
 
             forward = model(batch["sequence"])
-            loss = calculate_loss(
+            loss = calculate_betabinom_loss(
                 batch["k"],
                 batch["n"],
                 forward["pi"],
                 forward["mu"],
                 forward["phi"]
             )
+            if not torch.isfinite(loss).item():
+                raise FloatingPointError(
+                    f"Non-finite validation loss: {loss.item()}"
+                )
+
             losses.append({
                 "loss": loss.item() * batch["sequence"].shape[0],
                 "length": batch["sequence"].shape[0]
@@ -159,3 +186,58 @@ def fit_model(
     optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
 
     return history
+
+def train_model(
+    assembled_model: ConvModelFramework,
+    max_epochs: int = 1000,
+    checkpoint_path: str = "data/best_model.pt",
+    patience: int = 5,
+    min_delta: float = 1e-4,
+    verbose: bool = True
+) -> list[dict]:
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+    elif torch.backends.mps.is_available():
+        device = torch.device("mps")
+    else:
+        device = torch.device("cpu")
+
+    paths = EmergeCNNPaths(screen_name="r255x")
+    train_df, val_df = load_train_val(paths, seed=seed)
+
+    generator = torch.Generator()
+    generator.manual_seed(seed)
+    train_data = EmergeDataset(df=train_df)
+    val_data = EmergeDataset(df=val_df)
+    train_loader = torch.utils.data.DataLoader(
+        train_data,
+        batch_size=TRAIN_BATCH_SIZE,
+        shuffle=True,
+        generator=generator
+    )
+    val_loader = torch.utils.data.DataLoader(
+        val_data,
+        batch_size=VAL_BATCH_SIZE,
+        shuffle=False
+    )
+
+    assembled_model.to(device)
+
+    optimizer = torch.optim.Adam(
+        model.parameters(),
+        lr=1e-3
+    )
+
+    training_history = fit_model(
+        model=model,
+        train_loader=train_loader,
+        val_loader=val_loader,
+        optimizer=optimizer,
+        max_epochs=max_epochs,
+        checkpoint_path=checkpoint_path,
+        patience=patience,
+        min_delta=min_delta,
+        verbose=verbose
+    )
+
+    return training_history

@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import torch
+import random
 from dataclasses import dataclass, field
 from pathlib import Path
 from sklearn.model_selection import train_test_split
@@ -55,6 +56,14 @@ class EmergeCNNPaths:
                 f"Screen file does not exist: {self.screen_path}"
             )
 
+
+def set_seed(seed: int = 42) -> None:
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
 def splits_exist(paths: EmergeCNNPaths) -> bool:
     return (
