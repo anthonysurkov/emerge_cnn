@@ -10,6 +10,7 @@ from .paths import DATA_DIR
 
 
 NO_EDITING_CUTOFF = 0.05
+SPLITS_SEED = 42
 NT_MAP = {"A": 0, "C": 1, "G": 2, "U": 3, "T": 3}
 
 
@@ -75,15 +76,19 @@ def splits_exist(paths: EmergeCNNPaths) -> bool:
 def make_splits(
     df: pd.DataFrame,
     paths: EmergeCNNPaths,
-    seed: int = 42,
+    splits_seed: int = SPLITS_SEED,
     force_regenerate: bool = False
 ) -> None:
     if splits_exist(paths) and not force_regenerate:
         return
 
     def split_df(df: pd.DataFrame) -> tuple[pd.Index, pd.Index, pd.Index]:
-        train, remain = train_test_split(df, test_size=0.2, random_state=seed)
-        test, val = train_test_split(remain, test_size=0.5, random_state=seed)
+        train, remain = train_test_split(
+            df, test_size=0.2, random_state=splits_seed
+        )
+        test, val = train_test_split(
+            remain, test_size=0.5, random_state=splits_seed
+        )
         return train.index, val.index, test.index
 
     pos = split_df(df[df["mle"] > NO_EDITING_CUTOFF])

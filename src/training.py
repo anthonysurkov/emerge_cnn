@@ -6,6 +6,11 @@ from pathlib import Path
 from .losses import calculate_betabinom_loss
 from .truth import EmergeCNNPaths, EmergeDataset, load_train_val
 from .model import ConvModelFramework
+from .metadata import get_model_config, get_training_config, get_data_config
+
+
+TRAIN_BATCH_SIZE = 1024
+VAL_BATCH_SIZE = 4096
 
 
 def check_finite_gradients(model: torch.nn.Module) -> None:
@@ -123,9 +128,11 @@ def val_one_epoch(
 
 def fit_model(
     model: torch.nn.Module,
+    paths: EmergeCNNPaths,
     train_loader: torch.utils.data.DataLoader,
     val_loader: torch.utils.data.DataLoader,
     optimizer: torch.optim.Optimizer,
+    seed: int = 42,
     max_epochs: int = 1000,
     checkpoint_path: str = "data/best_model.pt",
     patience: int = 5,
@@ -161,14 +168,32 @@ def fit_model(
             best_val_loss = val_loss
             epochs_without_improvement = 0
 
+            metadata = {
+                "model_config": get_model_config(model),
+                "training_config": get_training_config(
+                    optimizer=optimizer,
+                    train_loader=train_loader,
+                    val_loader=val_loader,
+                    seed=seed,
+                    max_epochs=max_epochs,
+                    patience=patience,
+                    min_delta=min_delta
+                ),
+                "data_config": get_data_config(
+                    paths=paths,
+                )
+            }
             torch.save({
                 "epoch": epoch,
                 "model_state_dict": model.state_dict(),
                 "optimizer_state_dict": optimizer.state_dict(),
                 "train_loss": train_loss,
                 "val_loss": val_loss,
+                "history": history.copy(),
+                "metadata": metadata,
                 "concentration": phi,
-                "overdispersion": psi
+                "overdispersion": psi,
+                "torch_version": torch.__version__
                 }, checkpoint_path
             )
         else:
@@ -188,11 +213,12 @@ def fit_model(
     return history
 
 def train_model(
-    assembled_model: ConvModelFramework,
+    model: ConvModelFramework,
     max_epochs: int = 1000,
     checkpoint_path: str = "data/best_model.pt",
     patience: int = 5,
     min_delta: float = 1e-4,
+    seed: int = 42,
     verbose: bool = True
 ) -> list[dict]:
     if torch.cuda.is_available():
@@ -221,7 +247,7 @@ def train_model(
         shuffle=False
     )
 
-    assembled_model.to(device)
+    model.to(device)
 
     optimizer = torch.optim.Adam(
         model.parameters(),
@@ -230,9 +256,11 @@ def train_model(
 
     training_history = fit_model(
         model=model,
+        paths=paths,
         train_loader=train_loader,
         val_loader=val_loader,
         optimizer=optimizer,
+        seed=seed,
         max_epochs=max_epochs,
         checkpoint_path=checkpoint_path,
         patience=patience,
