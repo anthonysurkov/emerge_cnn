@@ -7,7 +7,7 @@ from .model import ConvModelFramework
 
 
 NUM_FILTERS = 32
-KERNEL_SIZE = 3
+KERNEL_SIZE = 4
 SEQ_LENGTH  = 10
 PHI_INIT    = 1
 

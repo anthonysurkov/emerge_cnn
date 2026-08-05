@@ -71,7 +71,7 @@ def train_one_epoch(
             "loss": loss.item() * batch["sequence"].shape[0],
             "length": batch["sequence"].shape[0]
         })
-        progress.set_postfix(loss=f"{loss.item():.3f}")
+        progress.set_postfix(loss=f"{loss.item():.4f}")
 
         if max_batches is not None and step >= max_batches:
             break
@@ -119,7 +119,7 @@ def val_one_epoch(
                 "loss": loss.item() * batch["sequence"].shape[0],
                 "length": batch["sequence"].shape[0]
             })
-            progress.set_postfix(loss=f"{loss.item():.3f}")
+            progress.set_postfix(loss=f"{loss.item():.4f}")
 
     return (
         sum(item["loss"] for item in losses)
@@ -205,7 +205,7 @@ def fit_model(
     checkpoint = torch.load(
         checkpoint_path,
         map_location=next(model.parameters()).device,
-        weights_only=True
+        weights_only=False
     )
     model.load_state_dict(checkpoint["model_state_dict"])
     optimizer.load_state_dict(checkpoint["optimizer_state_dict"])

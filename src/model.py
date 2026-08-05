@@ -33,7 +33,7 @@ class DenseHeads(torch.nn.Module):
     def __init__(self, input_size: int):
         super().__init__()
         self.pi_head = torch.nn.Linear(input_size, 1) # classifier head
-        self.mu_head = torch.nn.Linear(input_size, 1)  # regressor head
+        self.mu_head = torch.nn.Linear(input_size, 1) # regressor head
 
     def forward(self, filters: torch.Tensor) -> dict:
         pi_out = torch.sigmoid(

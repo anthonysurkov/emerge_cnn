@@ -13,13 +13,14 @@ def _as_list(value: int | tuple[int, ...]) -> list[int]:
     return [value]
 
 def get_model_config(model: torch.nn.Module) -> dict[str, Any]:
-    """Return the architecture settings needed to reconstruct a model."""
     config: dict[str, Any] = {
         "model_class": type(model).__name__,
         "encoder_class": type(model.encoder_block).__name__,
         "conv_class": type(model.conv_block).__name__,
         "heads_class": type(model.heads_block).__name__,
-        "parameter_count": sum(parameter.numel() for parameter in model.parameters()),
+        "parameter_count": (
+            sum(parameter.numel() for parameter in model.parameters())
+        ),
         "trainable_parameter_count": sum(
             parameter.numel()
             for parameter in model.parameters()
@@ -43,7 +44,10 @@ def get_model_config(model: torch.nn.Module) -> dict[str, Any]:
 
     pi_head = getattr(model.heads_block, "pi_head", None)
     mu_head = getattr(model.heads_block, "mu_head", None)
-    if isinstance(pi_head, torch.nn.Linear) and isinstance(mu_head, torch.nn.Linear):
+    if (
+        isinstance(pi_head, torch.nn.Linear)
+        and isinstance(mu_head, torch.nn.Linear)
+    ):
         config["heads"] = {
             "input_size": pi_head.in_features,
             "pi_outputs": pi_head.out_features,
@@ -62,7 +66,6 @@ def get_training_config(
     patience: int,
     min_delta: float,
 ) -> dict[str, Any]:
-    """Return the settings that control optimization and epoch selection."""
     return {
         "seed": seed,
         "optimizer_class": type(optimizer).__name__,
@@ -84,7 +87,6 @@ def get_data_config(
     split_seed: int = SPLITS_SEED,
     no_editing_cutoff: float = NO_EDITING_CUTOFF,
 ) -> dict[str, Any]:
-    """Return the dataset and canonical-split identity used by a run."""
     def path_string(path: Path) -> str:
         return str(path.resolve())
 
