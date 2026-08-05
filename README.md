@@ -61,23 +61,20 @@ hyperparameter set will reference the same train/validation split, with the
 final model selected by validation being evaluated on the canonical test split
 exactly once.
 
-The following modules will be available to slot into the schema:
-encoders/one_hot.py - just one-hot of sequences
-encoders/one_hot_positional.py - one-hot with one-hot position appended
-convs/one_layer.py - one conv-ReLU layer
-convs/two_layer.py - two conv-ReLU layers
-convs/one_layer_fixed.py - each position gets indp. set of weights instead of
-    reusing the same filter everywhere (position-variance attempt)
-heads/dense_heads.py - no hidden layers, just two output heads
-heads/split_heads.py - two independent dense branches prior to final sigmoid
-heads/hidden_layer.py - one full hidden layer (j=32) prior to sigmoids
-attrs/deep_lift.py - just uses DeepLIFT
-attrs/tf_modisco.py - just uses TF-MoDISco
+The following Python modules implement the schema:
+src/__init__.py - package initialization
+src/main.py - assembles and runs the baseline model
+src/model.py - one-hot encoding, one conv-ReLU layer, and two dense output heads
+src/losses.py - zero-inflated beta-binomial loss
+src/truth.py - dataset loading and train/validation/test splits
+src/training.py - model training and validation
+src/eval.py - model loading and evaluation
+src/metadata.py - model, training, and data metadata
+src/paths.py - data path configuration
+src/attr.py - attribution placeholder
+src/tests/__init__.py - test package initialization
+src/tests/test_loss.py - loss tests
 
 Loss will be zero-inflated beta binomial (ZIBB).
 
-These will be composed into models under the pipes/ directory. Each pipes/
-directory will own a MODEL.md, pipeline.py, and results/ directory. Each
-pipe will be called from main.py.
-The final model will live under final/, with all results and test-split
-validation summarized therein.
+These are composed into models and called from `src/main.py`.
