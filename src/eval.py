@@ -148,9 +148,7 @@ def eval_model(
 from .model import OneHotFeats, OneLayerConv, DenseHeads
 from .main import assemble_baseline_model
 
-def eval_main():
-    checkpoint_path = "data/selected_model.pt"
-
+def eval_main(checkpoint_path: str):
     checkpoint_Path = Path(checkpoint_path)
     assert checkpoint_Path.is_file()
 
@@ -167,4 +165,4 @@ def eval_main():
 
 
 if __name__ == "__main__":
-    eval_main()
+    eval_main(checkpoint_path="data/baseline_model_k7_f32_ckpt.pt")

@@ -214,7 +214,7 @@ def fit_model(
 
 def train_model(
     model: ConvModelFramework,
-    max_epochs: int = 1000,
+    max_epochs: int = 10000,
     checkpoint_path: str = "data/best_model.pt",
     patience: int = 5,
     min_delta: float = 1e-4,

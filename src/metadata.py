@@ -42,17 +42,9 @@ def get_model_config(model: torch.nn.Module) -> dict[str, Any]:
             "bias": conv.bias is not None,
         }
 
-    pi_head = getattr(model.heads_block, "pi_head", None)
-    mu_head = getattr(model.heads_block, "mu_head", None)
-    if (
-        isinstance(pi_head, torch.nn.Linear)
-        and isinstance(mu_head, torch.nn.Linear)
-    ):
-        config["heads"] = {
-            "input_size": pi_head.in_features,
-            "pi_outputs": pi_head.out_features,
-            "mu_outputs": mu_head.out_features,
-        }
+    heads_config = getattr(model.heads_block, "config", None)
+    if heads_config is not None:
+        config["heads"] = dict(heads_config)
 
     return config
 
