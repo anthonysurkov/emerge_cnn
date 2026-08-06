@@ -15,7 +15,7 @@ TRAIN_BATCH_SIZE = 256
 VAL_BATCH_SIZE   = 128
 
 # Naming
-MODEL_NAME = "twoconv"
+MODEL_NAME = "splithidden"
 
 
 from .model import OneHotFeats, OneLayerConv, DenseHeads
@@ -98,8 +98,39 @@ def assemble_splithidden_model() -> torch.nn.Module:
             ),
             hidden_size_pi=SPLITHIDDEN_HIDDEN_SIZE_PI,
             hidden_size_mu=SPLITHIDDEN_HIDDEN_SIZE_MU
-        )
+        ),
+        phi_init=PHI_INIT
     )
+
+from .model import OneHotFeats, TwoLayerConv, SharedHidden
+TWOC_SHAREDH_NUM_FILTERS_LAYER_ONE = 16
+TWOC_SHAREDH_NUM_FILTERS_LAYER_TWO = 64
+TWOC_SHAREDH_KERNEL_SIZE_LAYER_ONE = 3
+TWOC_SHAREDH_KERNEL_SIZE_LAYER_TWO = 4
+TWOC_SHAREDH_HIDDEN_SIZE = 32
+def assemble_twoconv_sharedhidden_model() -> torch.nn.Module:
+    return ConvModelFramework(
+        encoder_block=OneHotFeats(),
+        conv_block=TwoLayerConv(
+            num_filters_layer_one=TWOC_SHAREDH_NUM_FILTERS_LAYER_ONE,
+            num_filters_layer_two=TWOC_SHAREDH_NUM_FILTERS_LAYER_TWO,
+            kernel_size_layer_one=TWOC_SHAREDH_KERNEL_SIZE_LAYER_ONE,
+            kernel_size_layer_two=TWOC_SHAREDH_KERNEL_SIZE_LAYER_TWO
+        ),
+        heads_block=SharedHidden(
+            input_size=(
+                TWOC_SHAREDH_NUM_FILTERS_LAYER_TWO
+                * (SEQ_LENGTH
+                   - TWOC_SHAREDH_KERNEL_SIZE_LAYER_ONE
+                   - TWOC_SHAREDH_KERNEL_SIZE_LAYER_TWO
+                   + 2
+                )
+            ),
+            hidden_size=TWOC_SHAREDH_HIDDEN_SIZE
+        ),
+        phi_init=PHI_INIT
+    )
+
 
 def main(model_assembler: Callable):
     seed=42
@@ -138,16 +169,27 @@ def main(model_assembler: Callable):
             f"_hmu{SPLITHIDDEN_HIDDEN_SIZE_MU}"
             f"_ckpt.pt"
         )
+    elif MODEL_NAME == "twoconv_sharedhidden":
+        ckpt_path = (
+            f"{DATA_DIR}/{MODEL_NAME}_model"
+            f"_k1{TWOC_SHAREDH_KERNEL_SIZE_LAYER_ONE}"
+            f"_k2{TWOC_SHAREDH_KERNEL_SIZE_LAYER_TWO}"
+            f"_f1{TWOC_SHAREDH_NUM_FILTERS_LAYER_ONE}"
+            f"_f2{TWOC_SHAREDH_NUM_FILTERS_LAYER_TWO}"
+            f"_h{TWOC_SHAREDH_HIDDEN_SIZE}"
+            f"_ckpt.pt"
+        )
     else:
         raise ValueError(
             "Model name does not correspond to registered models"
         )
 
     train_model(
-        model=model_assembler,
+        model=model_assembler(),
         checkpoint_path=ckpt_path
     )
 
 
 if __name__ == "__main__":
-    main(model_assembler=assemble_twoconv_model())
+    model_assembler = globals()[f"assemble_{MODEL_NAME}_model"]
+    main(model_assembler=model_assembler)

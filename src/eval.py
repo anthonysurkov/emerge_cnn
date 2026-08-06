@@ -1,10 +1,9 @@
+from pathlib import Path
+from typing import Any
+
 import torch
 from torch.utils.data import DataLoader
-import numpy as np
 import pandas as pd
-from typing import Any, Callable
-from dataclasses import dataclass
-from pathlib import Path
 from sklearn.metrics import (
     roc_auc_score,
     average_precision_score,
@@ -21,12 +20,12 @@ from .truth import EmergeDataset, EmergeCNNPaths, load_train_val
 from .truth import SPLITS_SEED
 from .model import ConvModelFramework
 from .losses import betabinom_logprob
+from .utils import model_from_checkpoint
 
 
 def load_model(
-    checkpoint_path: str,
-    model_assembly_func: Callable
-) -> tuple[ConvModelFramework, Any]:
+    checkpoint_path: str | Path
+) -> tuple[ConvModelFramework, dict[str, Any]]:
     if torch.cuda.is_available():
         device = torch.device("cuda")
     elif torch.backends.mps.is_available():
@@ -36,13 +35,11 @@ def load_model(
 
     checkpoint = torch.load(
         checkpoint_path,
-        map_location=device,
+        map_location="cpu",
         weights_only=False
     )
-    state_dict = checkpoint["model_state_dict"]
 
-    model = model_assembly_func()
-    model.load_state_dict(state_dict)
+    model = model_from_checkpoint(checkpoint)
     model.to(device)
 
     return model, checkpoint
@@ -94,7 +91,6 @@ def _get_val(
     return val_df, val_loader
 
 def _append_editing_class(val_df: pd.DataFrame) -> None:
-    """Add the observed event modeled by the ZIBB mixture classifier."""
     val_df["editing_status"] = val_df["k"] > 0
 
 def eval_model(
@@ -144,25 +140,24 @@ def eval_model(
         "recall": recall_score(class_y_true, class_y_pred, zero_division=0)
     })
 
-
-from .model import OneHotFeats, OneLayerConv, DenseHeads
-from .main import assemble_baseline_model
-
 def eval_main(checkpoint_path: str):
-    checkpoint_Path = Path(checkpoint_path)
-    assert checkpoint_Path.is_file()
+    checkpoint_path = Path(checkpoint_path)
+    if not checkpoint_path.is_file():
+        raise FileNotFoundError(f"Checkpoint does not exist: {checkpoint_path}")
 
-    model, checkpoint = load_model(
-        checkpoint_path=checkpoint_path,
-        model_assembly_func=assemble_baseline_model
-    )
+    model, checkpoint = load_model(checkpoint_path=checkpoint_path)
+    metadata = checkpoint["metadata"]
+    data_config = metadata.get("data_config", {})
     statistics = eval_model(
         model=model,
-        model_config=checkpoint["metadata"]["model_config"],
-        screen_name="r255x"
+        model_config=metadata["model_config"],
+        screen_name=data_config.get("screen_name", "r255x"),
+        splits_seed=data_config.get("split_seed", SPLITS_SEED)
     )
     print(statistics)
 
 
 if __name__ == "__main__":
-    eval_main(checkpoint_path="data/baseline_model_k7_f32_ckpt.pt")
+    eval_main(
+        checkpoint_path="data/sharedhidden_model_k6_f64_hpi32_hmu32_ckpt.pt"
+    )
