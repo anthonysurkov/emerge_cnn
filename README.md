@@ -50,18 +50,22 @@ context length, and sampling strategies, all ask for adapted algorithms.
 
 A review of strategies used in DeepBind, DeepSEA, TF-MoDISco, and DeepLIFT
 yields the proposed schema:
+
 (1) Encoding into one-hot features.
     (n x N) sequences -> (d x n) x N one-hot matrices, where n=sequence length,
     N=number of examples, d=dimensionality, usually 4)
+
 (2) Convolutional layers: "standard" conv-ReLU layers, with flattening at the
     end into a vector. Note that pooling (as in DeepBind etc.) is not used
     in this architecture due to position-variance and small search space.
     (d x n) x N -> (n x F), where F is the number of filters used. Kernel
     size k and filter number F will be screened for promising models.
+
 (3) Fully-connected dual-head network: a hurdle model predicts a pi head
     for classification of whether a guide edits at all or not, and predicts a p
     head for regression of how well a guide edits.
     (n x F) -> pi, p
+
 (4) Attribution: all synthesized models are passed through a DeepLIFT- and
     TF-MoDISco-based pipeline to obtain motif position-weight matrices.
 
