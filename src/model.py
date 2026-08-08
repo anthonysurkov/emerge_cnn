@@ -1,192 +1,135 @@
 import torch
+from dataclasses import dataclass, asdict, field
+from typing import Any
+
+from .blocks import (
+    ConvModelFramework,
+    ConvStack,
+    DenseHeads,
+    SharedHidden,
+    SplitHidden
+)
 
 
-class OneHotFeats(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-
-    def forward(self, sequences: torch.Tensor):
-        return (
-            torch.nn.functional.one_hot(sequences, num_classes=4)
-              .float()
-              .permute(0, 2, 1)
-        )
-
-
-class OneLayerConv(torch.nn.Module):
-    def __init__(self, num_filters: int, kernel_size: int):
-        super().__init__()
-        self.layer = torch.nn.Conv1d(
-            in_channels=4,
-            out_channels=num_filters,
-            kernel_size=kernel_size
-        )
-        self.activation = torch.nn.ReLU()
-
-    def forward(self, sequences: torch.Tensor):
-        layer_out = self.layer(sequences)
-        active_out = self.activation(layer_out).flatten(start_dim=1)
-        return active_out
-
-
-class TwoLayerConv(torch.nn.Module):
-    def __init__(
-        self,
-        num_filters_layer_one: int,
-        num_filters_layer_two: int,
-        kernel_size_layer_one: int,
-        kernel_size_layer_two: int
-    ):
-        super().__init__()
-        self.layer_one = torch.nn.Conv1d(
-            in_channels=4,
-            out_channels=num_filters_layer_one,
-            kernel_size=kernel_size_layer_one
-        )
-        self.layer_two = torch.nn.Conv1d(
-            in_channels=num_filters_layer_one,
-            out_channels=num_filters_layer_two,
-            kernel_size=kernel_size_layer_two
-        )
-        self.activation = torch.nn.ReLU()
-
-    def forward(self, sequences: torch.Tensor):
-        layer_one_out = self.layer_one(sequences)
-        active_one_out = self.activation(layer_one_out)
-        layer_two_out = self.layer_two(active_one_out)
-        active_two_out = self.activation(layer_two_out).flatten(start_dim=1)
-        return active_two_out
-
-
-class DenseHeads(torch.nn.Module):
-    def __init__(self, input_size: int):
-        super().__init__()
-        self.config = {"input_size": input_size}
-        self.pi_head = torch.nn.Linear(input_size, 1) # classifier head
-        self.mu_head = torch.nn.Linear(input_size, 1) # regressor head
-        self.pi_activation = torch.nn.Sigmoid()
-        self.mu_activation = torch.nn.Sigmoid()
-
-    def forward(self, filters: torch.Tensor) -> dict:
-        pi = self.pi_activation(self.pi_head(filters)).squeeze(-1)
-        mu = self.mu_activation(self.mu_head(filters)).squeeze(-1)
-
-        return {"pi": pi, "mu": mu}
-
-
-class SharedHidden(torch.nn.Module):
-    def __init__(self, input_size: int, hidden_size: int):
-        super().__init__()
-        self.config = {
-            "input_size": input_size,
-            "hidden_size": hidden_size
+def serialize_head(spec) -> dict:
+    if isinstance(spec, DirectHeadSpec):
+        return {"type": "direct"}
+    if isinstance(spec, SharedHeadSpec):
+        return {"type": "shared", "hidden_size": spec.hidden_size}
+    if isinstance(spec, SplitHeadSpec):
+        return {
+            "type": "split",
+            "pi_hidden_size": spec.pi_hidden_size,
+            "mu_hidden_size": spec.mu_hidden_size
         }
 
-        self.hidden = torch.nn.Sequential(
-            torch.nn.Linear(input_size, hidden_size),
-            torch.nn.ReLU()
+@dataclass(frozen=True)
+class ConvLayerSpec:
+    filters: int
+    kernel_size: int
+
+@dataclass(frozen=True)
+class SharedHeadSpec:
+    hidden_size:
+
+@dataclass(frozen=True)
+class SplitHeadSpec:
+    pi_hidden_size: int
+    mu_hidden_size: int
+
+HeadSpec = DirectHeadSpec | SharedHeadSpec | SplitHeadSpec
+
+
+@dataclass(frozen=True)
+class ModelSpec:
+    preset_id: str
+    conv_layers: tuple[ConvLayerSpec, ...]
+    heads: HeadSpec
+    sequence_length: int = 10
+    phi_init: float = 1.0
+
+    def flattened_size(self) -> int:
+        output_length = self.sequence_length
+        for layer in self.conv_layers:
+            output_length -= layer.kernel_size - 1
+        if output_length < 1:
+            raise ValueError(
+                f"{self.preset_id!r} reduces seq below one pos"
+            )
+        return self.conv_layers[-1].filters * output_length
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+def build_model(spec: ModelSpec) -> ConvModelFramework:
+    conv = ConvStack(
+        in_channels=4,
+        layers=tuple(
+            (layer.filters, layer.kernel_size)
+            for layer in spec.conv_layers
+        ),
+    )
+    input_size = spec.flattened_size()
+
+    if isinstance(spec.heads, DirectHeadSpec):
+        heads = DenseHeads(input_size=input_size)
+    elif isinstance(spec.heads, SharedHeadSpec):
+        heads = SharedHidden(
+            input_size=input_size,
+            hidden_size=spec.heads.hidden_size
         )
-        self.pi_head = torch.nn.Linear(hidden_size, 1)
-        self.mu_head = torch.nn.Linear(hidden_size, 1)
-        self.pi_activation = torch.nn.Sigmoid()
-        self.mu_activation = torch.nn.Sigmoid()
-
-    def forward(self, filters: torch.Tensor) -> dict:
-        hidden = self.hidden(filters)
-
-        pi = self.pi_activation(self.pi_head(hidden)).squeeze(-1)
-        mu = self.mu_activation(self.mu_head(hidden)).squeeze(-1)
-
-        return {"pi": pi, "mu": mu}
-
-
-class TwoSharedHidden(torch.nn.Module):
-    def __init__(
-        self,
-        input_size: int,
-        hidden_size_one: int,
-        hidden_size_two: int
-    ):
-        super().__init__()
-        self.config = {
-            "input_size": input_size,
-            "hidden_size_one": hidden_size_one,
-            "hidden_size_two": hidden_size_two
-        }
-        self.hidden_one = torch.nn.Sequential(
-            torch.nn.Linear(input_size, hidden_size_one),
-            torch.nn.ReLU()
+    elif isinstance(spec.heads, SplitHeadSpec):
+        heads = SplitHidden(
+            input_size=input_size,
+            pi_hidden_size=spec.heads.pi_hidden_size,
+            mu_hidden_size=spec.heads.mu_hidden_size
         )
-        self.hidden_two = torch.nn.Sequential(
-            torch.nn.Linear(hidden_size_one, hidden_size_two),
-            torch.nn.ReLU()
-        )
-        self.pi_head = torch.nn.Linear(hidden_size_two, 1)
-        self.mu_head = torch.nn.Linear(hidden_size_two, 1)
-        self.pi_activation = torch.nn.Sigmoid()
-        self.mu_activation = torch.nn.Sigmoid()
+    else:
+        raise TypeError(f"Unsupported head: {spec.heads!r}")
 
-    def forward(self, filters: torch.Tensor) -> dict:
-        hidden_one = self.hidden_one(filters)
-        hidden_two = self.hidden_two(hidden_one)
-
-        pi = self.pi_activation(self.pi_head(hidden_two)).squeeze(-1)
-        mu = self.mu_activation(self.mu_head(hidden_two)).squeeze(-1)
-
-        return {"pi": pi, "mu": mu}
+    return ConvModelFramework(
+        conv_block=conv,
+        heads_block=heads,
+        phi_init=spec.phi_init
+    )
 
 
-class SplitHidden(torch.nn.Module):
-    def __init__(
-        self,
-        input_size: int,
-        hidden_size_pi: int,
-        hidden_size_mu: int
-    ):
-        super().__init__()
-        self.config = {
-            "input_size": input_size,
-            "hidden_size_pi": hidden_size_pi,
-            "hidden_size_mu": hidden_size_mu
-        }
-
-        self.hidden_pi = torch.nn.Sequential(
-            torch.nn.Linear(input_size, hidden_size_pi),
-            torch.nn.ReLU()
-        )
-        self.hidden_mu = torch.nn.Sequential(
-            torch.nn.Linear(input_size, hidden_size_mu),
-            torch.nn.ReLU()
-        )
-        self.pi_head = torch.nn.Linear(hidden_size_pi, 1)
-        self.mu_head = torch.nn.Linear(hidden_size_mu, 1)
-        self.pi_activation = torch.nn.Sigmoid()
-        self.mu_activation = torch.nn.Sigmoid()
-
-    def forward(self, filters: torch.Tensor) -> dict:
-        hidden_pi = self.hidden_pi(filters)
-        hidden_mu = self.hidden_mu(filters)
-
-        pi = self.pi_activation(self.pi_head(hidden_pi)).squeeze(-1)
-        mu = self.mu_activation(self.mu_head(hidden_mu)).squeeze(-1)
-
-        return {"pi": pi, "mu": mu}
+    preset_id: str
+    conv_layers: tuple[ConvLayerSpec, ...]
+    heads: HeadSpec
+    sequence_length: int = 10
+    phi_init: float = 1.0
 
 
-class ConvModelFramework(torch.nn.Module):
-    def __init__(self, encoder_block, conv_block, heads_block, phi_init):
-        super().__init__()
-        self.encoder_block = encoder_block
-        self.conv_block = conv_block
-        self.heads_block = heads_block
-        self.phi_raw = torch.nn.Parameter(
-            torch.tensor(phi_init, dtype=torch.float32)
-        )
+# PRESETS
 
-    def forward(self, sequences: torch.Tensor):
-        encoder_out = self.encoder_block(sequences)
-        convs_out = self.conv_block(encoder_out)
-        out = self.heads_block(convs_out)
-        phi = torch.nn.functional.softplus(self.phi_raw)
-        out["phi"] = phi
-        return out
+def config_conv2_sharedmlp(
+    f1: int,
+    k1: int,
+    f2: int,
+    k2: int,
+    h: int
+) -> ModelSpec:
+    return ModelSpec(
+        preset_id = f"conv2-f1-{f1}-k1-{k1}-f2-{f2}-k2-{k2}-sharedmlp-{h}",
+        conv_layers=(
+            ConvLayerSpec(filters=f1, kernel_size=k1),
+            ConvLayerSpec(filters=f2, kernel_size=k2)
+        ),
+        heads=SharedHeadSpec(hidden_size=h)
+    )
+
+def scanconfig_conv2_sharemlp(
+    f1_range: list[int],
+    k1_range: list[int],
+    f2_range: list[int],
+    k2_range: list[int],
+    h_range: int
+) -> list[ModelSpec]:
+    return list(
+        config_conv2_sharedmlp(f1, k1, f2, k2, h)
+        for f1, k1, f2, k2, h
+        in zip(f1_range, k1_range, f2_range, k2_range, h_range)
+    )
+
