@@ -3,12 +3,11 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 from pathlib import Path
 
-from .losses import calculate_betabinom_loss
+from .losses import calculate_betabinom_loss, frequency_tempered_weights
 from .truth import (
     EmergeCNNPaths,
     EmergeDataset,
-    frequency_tempered_weights,
-    load_train_val,
+    load_train_val
 )
 from .model import ConvModelFramework
 from .metadata import get_model_config, get_training_config, get_data_config

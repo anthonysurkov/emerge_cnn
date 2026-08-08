@@ -5,53 +5,17 @@ import random
 from dataclasses import dataclass, field
 from pathlib import Path
 from sklearn.model_selection import train_test_split
+from sklearn.model_selection import KFold
 
 from .paths import DATA_DIR
 
 
 NO_EDITING_CUTOFF = 0.05
+SEED = 42
 SPLITS_SEED = 42
 NT_MAP = {"A": 0, "C": 1, "G": 2, "U": 3, "T": 3}
 
-# These fixed cut points isolate the observed editing tail without deriving
-# strata from validation or test data. The final stratum is greater than 0.64.
 EDITING_STRATUM_UPPER_BOUNDS = (0.0, 0.02, 0.10, 0.40, 0.64)
-
-
-def editing_strata(mle: pd.Series | np.ndarray) -> np.ndarray:
-    values = np.asarray(mle, dtype=np.float64)
-    if values.ndim != 1:
-        raise ValueError("mle must be one-dimensional")
-    if not np.isfinite(values).all():
-        raise ValueError("mle must contain only finite values")
-    if ((values < 0) | (values > 1)).any():
-        raise ValueError("mle values must be between 0 and 1")
-
-    return np.searchsorted(
-        EDITING_STRATUM_UPPER_BOUNDS,
-        values,
-        side="left"
-    )
-
-
-def frequency_tempered_weights(
-    mle: pd.Series | np.ndarray,
-    power: float = 0.25
-) -> np.ndarray:
-    if not 0 <= power <= 1:
-        raise ValueError("power must be between 0 and 1")
-
-    strata = editing_strata(mle)
-    if len(strata) == 0:
-        return np.empty(0, dtype=np.float32)
-
-    counts = np.bincount(
-        strata,
-        minlength=len(EDITING_STRATUM_UPPER_BOUNDS) + 1
-    )
-    weights = counts[strata].astype(np.float64) ** (-power)
-    weights /= weights.mean()
-    return weights.astype(np.float32)
 
 
 class EmergeDataset(torch.utils.data.Dataset):
@@ -146,10 +110,16 @@ def make_splits(
 
     def split_df(df: pd.DataFrame) -> tuple[pd.Index, pd.Index, pd.Index]:
         train, remain = train_test_split(
-            df, test_size=0.2, random_state=splits_seed
+            df,
+            test_size=0.2,
+            stratify=editing_strata(df["mle"]),
+            random_state=splits_seed
         )
         test, val = train_test_split(
-            remain, test_size=0.5, random_state=splits_seed
+            remain,
+            test_size=0.5,
+            stratify=editing_strata(remain["mle"]),
+            random_state=splits_seed
         )
         return train.index, val.index, test.index
 
@@ -200,3 +170,34 @@ def load_test(
     test_idx = pd.read_csv(paths.test_path)["idx"]
     test_df = df.loc[test_idx]
     return test_df
+
+def editing_strata(mle: pd.Series | np.ndarray) -> np.ndarray:
+    values = np.asarray(mle, dtype=np.float64)
+    if values.ndim != 1:
+        raise ValueError("mle must be one-dimensional")
+    if not np.isfinite(values).all():
+        raise ValueError("mle must contain only finite values")
+    if ((values < 0) | (values > 1)).any():
+        raise ValueError("mle values must be between 0 and 1")
+
+    return np.searchsorted(
+        EDITING_STRATUM_UPPER_BOUNDS,
+        values,
+        side="left"
+    )
+
+def stratified_kfolds(n_splits: int, splits_seed: int = SPLITS_SEED):
+    strata = editing_strata(df["mle"])
+    kfold = StratifiedKFold(
+        n_splits=n_splits,
+        shuffle=True,
+        random_state=splits_seed
+    )
+    k_train_vals: list[tuple[EmergeDataset, EmergeDataset]]
+    for fold, (train_idx, val_idx) in enumerate(kfold.split(df, strata)):
+        train_df = df.iloc[train_idx]
+        val_df = df.iloc[val_idx]
+        train_dataset = EmergeDataset(train_df)
+        val_dataset = EmergeDataset(val_df)
+        k_train_vals.append(train_dataset, val_dataset)
+    return k_train_vals
