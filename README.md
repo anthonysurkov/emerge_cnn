@@ -28,7 +28,7 @@ sequence-invariant.
 an R2=0.87 between sequence identity and `n`. Moreover, coverage is
 anti-aligned with editing, with top editing motifs generally having lower `n`
 than non-editing motifs. Here, top editing motifs are references from both
-k-mer ridge regression baseline (see: kmer/) and previous thresholded-theta
+k-mer ridge regression baseline (see: baseline/) and previous thresholded-theta
 supervised clustering experiments.
 This makes thresholded-theta approaches difficult, as enrichment of a
 high-editing subset (for STREME-like analysis or similar) via mixture modeling

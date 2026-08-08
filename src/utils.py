@@ -14,7 +14,6 @@ def _resolve_module_class(name: str) -> type[torch.nn.Module]:
 
     return cls
 
-
 def _get_model_blocks(checkpoint: dict[str, Any]) -> dict[str, Any]:
     config = checkpoint["metadata"]["model_config"]
     state_dict = checkpoint["model_state_dict"]
@@ -57,7 +56,6 @@ def _get_model_blocks(checkpoint: dict[str, Any]) -> dict[str, Any]:
         "phi_init": state_dict["phi_raw"].item(),
     }
 
-
 def model_from_checkpoint(
     checkpoint: dict[str, Any]
 ) -> model.ConvModelFramework:
@@ -72,3 +70,10 @@ def model_from_checkpoint(
     cnn = model_class(**_get_model_blocks(checkpoint))
     cnn.load_state_dict(checkpoint["model_state_dict"])
     return cnn
+
+def get_device() -> torch.device:
+    return torch.device(
+        "cuda" if torch.cuda.is_available()
+        else "mps" if torch.backends.mps.is_available()
+        else "cpu"
+    )
