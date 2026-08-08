@@ -1,13 +1,24 @@
 import torch
 import numpy as np
+import pandas as pd
+from dataclasses import dataclass
 from pathlib import Path
 from captum.attr import DeepLift
-from modiscolite.tfmodisco import TFMoDISco
 from modiscolite.io import save_hdf5
+from modiscolite.core import Seqlet, SeqletSet
 
 from . import model
+from .modisco import tfmodisco_forward_only
 from .truth import EmergeDataset, EmergeCNNPaths, load_train_val
 from . import utils
+
+
+@dataclass
+class ModiscoCluster():
+    identity: str
+    ppm: np.ndarray
+    cwm: np.ndarray
+    df: pd.DataFrame
 
 
 class AttrModel(torch.nn.Module):
@@ -140,7 +151,8 @@ def do_modisco(
     ohe_np: np.ndarray = calc_padded_ohe(ohe=ohe, size=flank_size)
     hyp_np: np.ndarray = calc_padded_hyp(hyps=hyp_contribs, size=flank_size)
 
-    pos_patterns, neg_patterns = TFMoDISco(
+    # EMERGe positions are stranded; reverse complements are distinct inputs.
+    pos_patterns, neg_patterns = tfmodisco_forward_only(
         one_hot=ohe_np,
         hypothetical_contribs=hyp_np,
         sliding_window_size=window_size,
@@ -173,7 +185,47 @@ def calc_hyp_batches(
         hyp_batches.append(hyp.detach().cpu())
     return ohe_batches, hyp_batches
 
-def attr_main(checkpoint_path: str, screen_name="r255x"):
+def decode_seqlet(seqlet: Seqlet) -> str:
+    bases = np.array(["A","C","G","T"])
+    return "".join(
+        "N" if np.allclose(row, 0.25) else bases[np.argmax(row)]
+        for row in seqlet.sequence
+    )
+
+def get_seqlets_emerge(
+    seqlets: list[Seqlet],
+    df: pd.DataFrame
+) -> pd.DataFrame:
+    dflet = pd.DataFrame({
+        "5to3": [decode_seqlet(s) for s in seqlets],
+        "contrib": [s.contrib_score for s in seqlets]
+    })
+    return (
+        df.merge(seqlet_df, on="5to3", how="innfer")
+          .sort_values("contrib", ascending=False)
+          .reset_index(drop=True)
+    )
+
+def process_modisco_patterns(
+    patterns: list[SeqletSet],
+    df: pd.DataFrame,
+    id_prefix: str
+) -> list[ModiscoCluster]:
+    return [
+        ModiscoCluster(
+            identity=f"{id_prefix}{i}",
+            ppm=pattern.sequence.copy(),
+            cwm=pattern.contrib_scores.copy(),
+            df=get_seqlets_emerge(pattern.seqlets, df)
+        )
+        for i, pattern in enumerate(patterns)
+    ]
+
+def attr_main(
+    checkpoint_path: str,
+    outpath: str | None = None,
+    screen_name: str = "r255x"
+) -> tuple[list[ModiscoCluster], list[ModiscoCluster]]:
     device = utils.get_device()
 
     checkpoint = torch.load(
@@ -197,9 +249,29 @@ def attr_main(checkpoint_path: str, screen_name="r255x"):
     ohe = torch.cat(ohe_batches)
     hyp_contribs = torch.cat(hyp_batches)
 
-    pos_patterns, neg_patterns = do_modisco(ohe=ohe, hyp_contribs=hyp_contribs)
-    print(pos_patterns)
+    pos_patterns, neg_patterns = do_modisco(
+        ohe=ohe,
+        hyp_contribs=hyp_contribs,
+        outpath=outpath
+    )
+    pos_clusts: list[ModiscoCluster] = process_modisco_patterns(
+        patterns=pos_patterns,
+        df=val_df,
+        id_prefix="c"
+    )
+    neg_clusts: list[ModiscoCluster] = process_modisco_patterns(
+        patterns=neg_patterns,
+        df=val_df,
+        id_prefix="n"
+    )
+    return pos_clusts, neg_clusts
 
 
 if __name__ == "__main__":
-    attr_main(checkpoint_path="data/current_best/twoconv_sharedhidden_model_k13_k24_f116_f264_h32_ckpt.pt")
+    clusts, _ = attr_main(
+        checkpoint_path=(
+            "data/current_best/"
+            "twoconv_sharedhidden_model_k13_k24_f116_f264_h32_ckpt.pt"
+        )
+    )
+    print(clusts)
