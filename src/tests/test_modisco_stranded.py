@@ -6,7 +6,7 @@ import numpy as np
 from modiscolite import affinitymat, aggregator
 from modiscolite.core import Seqlet, SeqletSet
 
-from src.modisco_stranded import (
+from src.modisco import (
     align_patterns_forward,
     cosine_similarity_from_seqlets_forward,
     jaccard_from_seqlets_forward,
@@ -123,7 +123,7 @@ class ForwardOnlyAdapterTests(unittest.TestCase):
             return [], []
 
         with patch(
-            "src.modisco_stranded.TFMoDISco",
+            "src.modisco.TFMoDISco",
             side_effect=inspect_algorithms
         ):
             self.assertEqual(tfmodisco_forward_only(), ([], []))
@@ -141,7 +141,7 @@ class ForwardOnlyAdapterTests(unittest.TestCase):
         patterns = [SeqletSet([reverse_seqlet])]
 
         with patch(
-            "src.modisco_stranded.TFMoDISco",
+            "src.modisco.TFMoDISco",
             return_value=(patterns, None)
         ):
             with self.assertRaisesRegex(RuntimeError, "reverse-complemented"):

@@ -186,6 +186,25 @@ def editing_strata(mle: pd.Series | np.ndarray) -> np.ndarray:
         side="left"
     )
 
+def frequency_tempered_weights(
+    mle: pd.Series | np.ndarray,
+    power: float = 0.25
+) -> np.ndarray:
+    if not 0 <= power <= 1:
+        raise ValueError("power must be between 0 and 1")
+
+    strata = editing_strata(mle)
+    if len(strata) == 0:
+        return np.empty(0, dtype=np.float32)
+
+    counts = np.bincount(
+        strata,
+        minlength=len(EDITING_STRATUM_UPPER_BOUNDS) + 1
+    )
+    weights = counts[strata].astype(np.float64) ** (-power)
+    weights /= weights.mean()
+    return weights.astype(np.float32)
+
 def stratified_kfolds(n_splits: int, splits_seed: int = SPLITS_SEED):
     strata = editing_strata(df["mle"])
     kfold = StratifiedKFold(

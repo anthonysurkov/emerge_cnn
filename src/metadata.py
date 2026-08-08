@@ -4,6 +4,7 @@ from typing import Any
 import torch
 from torch.utils.data import DataLoader
 
+from .blocks import ConvStack
 from .truth import (
     EDITING_STRATUM_UPPER_BOUNDS,
     EmergeCNNPaths,
@@ -45,6 +46,15 @@ def get_model_config(model: torch.nn.Module) -> dict[str, Any]:
             "dilation": _as_list(conv.dilation),
             "groups": conv.groups,
             "bias": conv.bias is not None,
+        }
+    elif isinstance(model.conv_block, ConvStack):
+        convolutions = model.conv_block.convolutions
+        config["convolution"] = {
+            "in_channels": convolutions[0].in_channels,
+            "layers": [
+                [layer.out_channels, layer.kernel_size[0]]
+                for layer in convolutions
+            ],
         }
 
     heads_config = getattr(model.heads_block, "config", None)

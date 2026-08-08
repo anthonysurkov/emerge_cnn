@@ -22,7 +22,13 @@ def _get_model_blocks(checkpoint: dict[str, Any]) -> dict[str, Any]:
     conv_class = _resolve_module_class(config["conv_class"])
     heads_class = _resolve_module_class(config["heads_class"])
 
-    if config["conv_class"] == "OneLayerConv":
+    if config["conv_class"] == "ConvStack":
+        convolution = config["convolution"]
+        conv_kwargs = {
+            "in_channels": convolution["in_channels"],
+            "layers": tuple(map(tuple, convolution["layers"])),
+        }
+    elif config["conv_class"] == "OneLayerConv":
         conv_weight = state_dict["conv_block.layer.weight"]
         conv_kwargs = {
             "num_filters": conv_weight.shape[0],

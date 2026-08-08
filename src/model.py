@@ -1,11 +1,12 @@
-import torch
-from dataclasses import dataclass, asdict, field
+from dataclasses import dataclass, asdict
+from itertools import product
 from typing import Any
 
 from .blocks import (
     ConvModelFramework,
     ConvStack,
     DenseHeads,
+    OneHotFeats,
     SharedHidden,
     SplitHidden
 )
@@ -29,8 +30,12 @@ class ConvLayerSpec:
     kernel_size: int
 
 @dataclass(frozen=True)
+class DirectHeadSpec:
+    pass
+
+@dataclass(frozen=True)
 class SharedHeadSpec:
-    hidden_size:
+    hidden_size: int
 
 @dataclass(frozen=True)
 class SplitHeadSpec:
@@ -82,24 +87,18 @@ def build_model(spec: ModelSpec) -> ConvModelFramework:
     elif isinstance(spec.heads, SplitHeadSpec):
         heads = SplitHidden(
             input_size=input_size,
-            pi_hidden_size=spec.heads.pi_hidden_size,
-            mu_hidden_size=spec.heads.mu_hidden_size
+            hidden_size_pi=spec.heads.pi_hidden_size,
+            hidden_size_mu=spec.heads.mu_hidden_size
         )
     else:
         raise TypeError(f"Unsupported head: {spec.heads!r}")
 
     return ConvModelFramework(
+        encoder_block=OneHotFeats(),
         conv_block=conv,
         heads_block=heads,
         phi_init=spec.phi_init
     )
-
-
-    preset_id: str
-    conv_layers: tuple[ConvLayerSpec, ...]
-    heads: HeadSpec
-    sequence_length: int = 10
-    phi_init: float = 1.0
 
 
 # PRESETS
@@ -120,16 +119,15 @@ def config_conv2_sharedmlp(
         heads=SharedHeadSpec(hidden_size=h)
     )
 
-def scanconfig_conv2_sharemlp(
+def scanconfig_conv2_sharedmlp(
     f1_range: list[int],
     k1_range: list[int],
     f2_range: list[int],
     k2_range: list[int],
-    h_range: int
+    h_range: list[int]
 ) -> list[ModelSpec]:
-    return list(
+    return [
         config_conv2_sharedmlp(f1, k1, f2, k2, h)
         for f1, k1, f2, k2, h
-        in zip(f1_range, k1_range, f2_range, k2_range, h_range)
-    )
-
+        in product(f1_range, k1_range, f2_range, k2_range, h_range)
+    ]

@@ -4,11 +4,16 @@ import torch
 
 from src.metadata import get_model_config
 from src.model import (
+    ConvLayerSpec,
     ConvModelFramework,
-    OneHotFeats,
-    OneLayerConv,
+    ModelSpec,
+    SharedHeadSpec,
+    SplitHeadSpec,
+    build_model,
+)
+from src.blocks import (
+    ConvStack,
     SplitHidden,
-    TwoLayerConv,
     SharedHidden,
 )
 from src.utils import model_from_checkpoint
@@ -31,29 +36,32 @@ class CheckpointLoadingTests(unittest.TestCase):
             torch.testing.assert_close(actual.state_dict()[name], tensor)
 
     def test_reconstructs_split_hidden_model(self):
-        self.assert_checkpoint_round_trip(ConvModelFramework(
-            encoder_block=OneHotFeats(),
-            conv_block=OneLayerConv(num_filters=64, kernel_size=6),
-            heads_block=SplitHidden(
-                input_size=320,
-                hidden_size_pi=32,
-                hidden_size_mu=16,
+        model = build_model(ModelSpec(
+            preset_id="test-split",
+            conv_layers=(
+                ConvLayerSpec(filters=64, kernel_size=6),
             ),
-            phi_init=1,
+            heads=SplitHeadSpec(pi_hidden_size=32, mu_hidden_size=16),
         ))
+        self.assert_checkpoint_round_trip(model)
 
     def test_reconstructs_two_layer_shared_hidden_model(self):
-        self.assert_checkpoint_round_trip(ConvModelFramework(
-            encoder_block=OneHotFeats(),
-            conv_block=TwoLayerConv(
-                num_filters_layer_one=16,
-                num_filters_layer_two=64,
-                kernel_size_layer_one=3,
-                kernel_size_layer_two=4,
+        model = build_model(ModelSpec(
+            preset_id="test-two-layer-shared",
+            conv_layers=(
+                ConvLayerSpec(filters=16, kernel_size=3),
+                ConvLayerSpec(filters=64, kernel_size=4),
             ),
-            heads_block=SharedHidden(input_size=320, hidden_size=32),
-            phi_init=1,
+            heads=SharedHeadSpec(hidden_size=32),
         ))
+        self.assert_checkpoint_round_trip(model)
+
+        config = get_model_config(model)
+        self.assertEqual(config["conv_class"], ConvStack.__name__)
+        self.assertEqual(
+            config["convolution"],
+            {"in_channels": 4, "layers": [[16, 3], [64, 4]]},
+        )
 
 
 if __name__ == "__main__":

@@ -3,10 +3,11 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 from pathlib import Path
 
-from .losses import calculate_betabinom_loss, frequency_tempered_weights
+from .losses import calculate_betabinom_loss
 from .truth import (
     EmergeCNNPaths,
     EmergeDataset,
+    frequency_tempered_weights,
     load_train_val
 )
 from .model import ConvModelFramework
@@ -36,7 +37,9 @@ def train_one_epoch(
     train_loader: DataLoader,
     optimizer,
     max_batches = None,
-    verbose = True
+    verbose = True,
+    progress_label: str | None = None,
+    progress_position: int = 0
 ) -> float:
     model.train()
     losses = []
@@ -44,8 +47,13 @@ def train_one_epoch(
     device = next(model.parameters()).device
     progress = tqdm(
         train_loader,
-        desc="Training epoch",
+        desc=(
+            f"[{progress_label}] Training epoch"
+            if progress_label
+            else "Training epoch"
+        ),
         unit=" batches",
+        position=progress_position,
         disable=not verbose
     )
     for step, batch in enumerate(progress, start=1):
@@ -95,7 +103,9 @@ def train_one_epoch(
 def val_one_epoch(
     model: torch.nn.Module,
     val_loader: torch.utils.data.DataLoader,
-    verbose = True
+    verbose = True,
+    progress_label: str | None = None,
+    progress_position: int = 0
 ) -> float:
     model.eval()
     losses = []
@@ -103,8 +113,13 @@ def val_one_epoch(
     device = next(model.parameters()).device
     progress = tqdm(
         val_loader,
-        desc="Validating epoch",
+        desc=(
+            f"[{progress_label}] Validating epoch"
+            if progress_label
+            else "Validating epoch"
+        ),
         unit=" batches",
+        position=progress_position,
         disable=not verbose
     )
     with torch.no_grad():
@@ -150,7 +165,9 @@ def fit_model(
     patience: int = 5,
     min_delta: float = 1e-4,
     tail_weight_power: float = 0.0,
-    verbose: bool = True
+    verbose: bool = True,
+    progress_label: str | None = None,
+    progress_position: int = 0
 ) -> list[dict]:
     best_val_loss = float("inf")
     epochs_without_improvement = 0
@@ -164,9 +181,17 @@ def fit_model(
             model,
             train_loader,
             optimizer,
-            verbose=verbose
+            verbose=verbose,
+            progress_label=progress_label,
+            progress_position=progress_position
         )
-        val_loss = val_one_epoch(model, val_loader, verbose=verbose)
+        val_loss = val_one_epoch(
+            model,
+            val_loader,
+            verbose=verbose,
+            progress_label=progress_label,
+            progress_position=progress_position
+        )
         phi = torch.nn.functional.softplus(model.phi_raw).item()
         psi = 1 / (phi + 1)
         history.append({
@@ -228,13 +253,15 @@ def fit_model(
 
 def train_model(
     model: ConvModelFramework,
+    checkpoint_path: str,
     max_epochs: int = 10000,
-    checkpoint_path: str = "data/best_model.pt",
     patience: int = 5,
     min_delta: float = 1e-4,
     seed: int = 42,
     tail_weight_power: float = TAIL_WEIGHT_POWER,
-    verbose: bool = True
+    verbose: bool = True,
+    progress_label: str | None = None,
+    progress_position: int = 0
 ) -> list[dict]:
     if torch.cuda.is_available():
         device = torch.device("cuda")
@@ -288,7 +315,9 @@ def train_model(
         patience=patience,
         min_delta=min_delta,
         tail_weight_power=tail_weight_power,
-        verbose=verbose
+        verbose=verbose,
+        progress_label=progress_label,
+        progress_position=progress_position
     )
 
     return training_history

@@ -98,7 +98,7 @@ def eval_model(
     model_config: dict[str, Any],
     screen_name: str = "r255x",
     splits_seed: int = SPLITS_SEED
-):
+) -> dict[str, Any]:
     device = next(model.parameters()).device
     model.eval()
 
@@ -140,7 +140,7 @@ def eval_model(
         "recall": recall_score(class_y_true, class_y_pred, zero_division=0)
     })
 
-def eval_main(checkpoint_path: str):
+def eval_main(checkpoint_path: str) -> dict[str, Any]:
     checkpoint_path = Path(checkpoint_path)
     if not checkpoint_path.is_file():
         raise FileNotFoundError(f"Checkpoint does not exist: {checkpoint_path}")
@@ -148,19 +148,19 @@ def eval_main(checkpoint_path: str):
     model, checkpoint = load_model(checkpoint_path=checkpoint_path)
     metadata = checkpoint["metadata"]
     data_config = metadata.get("data_config", {})
-    statistics = eval_model(
+    return eval_model(
         model=model,
         model_config=metadata["model_config"],
         screen_name=data_config.get("screen_name", "r255x"),
         splits_seed=data_config.get("split_seed", SPLITS_SEED)
     )
-    print(statistics)
 
 
 if __name__ == "__main__":
-    eval_main(
+    statistics = eval_main(
         checkpoint_path = (
             f"{DATA_DIR}/"
             f"twoconv_sharedhidden_model_k13_k24_f116_f264_h32_ckpt.pt"
         )
     )
+    print(statistics)
