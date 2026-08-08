@@ -16,7 +16,7 @@ from sklearn.metrics import (
     root_mean_squared_error
 )
 
-from .truth import EmergeDataset, EmergeCNNPaths, load_train_val
+from .truth import EmergeDataset, EmergeCNNPaths, load_train_val, DATA_DIR
 from .truth import SPLITS_SEED
 from .model import ConvModelFramework
 from .losses import betabinom_logprob
@@ -159,5 +159,8 @@ def eval_main(checkpoint_path: str):
 
 if __name__ == "__main__":
     eval_main(
-        checkpoint_path="data/sharedhidden_model_k6_f64_hpi32_hmu32_ckpt.pt"
+        checkpoint_path = (
+            f"{DATA_DIR}/"
+            f"twoconv_sharedhidden_model_k13_k24_f116_f264_h32_ckpt.pt"
+        )
     )

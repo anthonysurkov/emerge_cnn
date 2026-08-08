@@ -13,10 +13,66 @@ NO_EDITING_CUTOFF = 0.05
 SPLITS_SEED = 42
 NT_MAP = {"A": 0, "C": 1, "G": 2, "U": 3, "T": 3}
 
+# These fixed cut points isolate the observed editing tail without deriving
+# strata from validation or test data. The final stratum is greater than 0.64.
+EDITING_STRATUM_UPPER_BOUNDS = (0.0, 0.02, 0.10, 0.40, 0.64)
+
+
+def editing_strata(mle: pd.Series | np.ndarray) -> np.ndarray:
+    values = np.asarray(mle, dtype=np.float64)
+    if values.ndim != 1:
+        raise ValueError("mle must be one-dimensional")
+    if not np.isfinite(values).all():
+        raise ValueError("mle must contain only finite values")
+    if ((values < 0) | (values > 1)).any():
+        raise ValueError("mle values must be between 0 and 1")
+
+    return np.searchsorted(
+        EDITING_STRATUM_UPPER_BOUNDS,
+        values,
+        side="left"
+    )
+
+
+def frequency_tempered_weights(
+    mle: pd.Series | np.ndarray,
+    power: float = 0.25
+) -> np.ndarray:
+    if not 0 <= power <= 1:
+        raise ValueError("power must be between 0 and 1")
+
+    strata = editing_strata(mle)
+    if len(strata) == 0:
+        return np.empty(0, dtype=np.float32)
+
+    counts = np.bincount(
+        strata,
+        minlength=len(EDITING_STRATUM_UPPER_BOUNDS) + 1
+    )
+    weights = counts[strata].astype(np.float64) ** (-power)
+    weights /= weights.mean()
+    return weights.astype(np.float32)
+
 
 class EmergeDataset(torch.utils.data.Dataset):
-    def __init__(self, df: pd.DataFrame):
+    def __init__(
+        self,
+        df: pd.DataFrame,
+        loss_weights: pd.Series | np.ndarray | None = None
+    ):
         self.df = df.reset_index(drop=True)
+        self.loss_weights = None
+        if loss_weights is not None:
+            weights = np.asarray(loss_weights, dtype=np.float32)
+            if weights.ndim != 1 or len(weights) != len(self.df):
+                raise ValueError(
+                    "loss_weights must be one-dimensional and match df length"
+                )
+            if not np.isfinite(weights).all() or (weights < 0).any():
+                raise ValueError(
+                    "loss_weights must contain finite, nonnegative values"
+                )
+            self.loss_weights = weights
 
     def __len__(self):
         return len(self.df)
@@ -31,7 +87,13 @@ class EmergeDataset(torch.utils.data.Dataset):
         k = torch.tensor(row["k"], dtype=torch.float32)
         mle = torch.tensor(row["mle"], dtype=torch.float32)
 
-        return {"sequence": sequence, "n": n, "k": k, "mle": mle}
+        item = {"sequence": sequence, "n": n, "k": k, "mle": mle}
+        if self.loss_weights is not None:
+            item["loss_weight"] = torch.tensor(
+                self.loss_weights[index],
+                dtype=torch.float32
+            )
+        return item
 
 
 @dataclass
@@ -97,7 +159,7 @@ def make_splits(
     val_idx = pos[1].append(zer[1])
     test_idx = pos[2].append(zer[2])
 
-    rng = np.random.default_rng(seed)
+    rng = np.random.default_rng(splits_seed)
     train_idx = pd.Index(rng.permutation(train_idx))
     val_idx = pd.Index(rng.permutation(val_idx))
     test_idx = pd.Index(rng.permutation(test_idx))
@@ -118,7 +180,7 @@ def load_train_val(
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     df = pd.read_csv(paths.screen_path, usecols=["5to3", "n", "k", "mle"])
     if not splits_exist(paths) or force_regenerate:
-        make_splits(df, paths, seed=seed, force_regenerate=force_regenerate)
+        make_splits(df, paths, splits_seed=seed, force_regenerate=force_regenerate)
 
     train_idx = pd.read_csv(paths.train_path)["idx"]
     train_df = df.loc[train_idx]
@@ -138,4 +200,3 @@ def load_test(
     test_idx = pd.read_csv(paths.test_path)["idx"]
     test_df = df.loc[test_idx]
     return test_df
-

@@ -4,7 +4,7 @@ import numpy as np
 import torch
 from scipy.stats import betabinom
 
-from core import betabinom_logprob, calculate_loss
+from src.losses import betabinom_logprob, calculate_betabinom_loss
 
 
 class BetaBinomialLossTests(unittest.TestCase):
@@ -28,7 +28,7 @@ class BetaBinomialLossTests(unittest.TestCase):
         mu = torch.tensor([0.10, 0.35, 0.25, 0.60], dtype=torch.float64)
         phi = torch.tensor(4.0, dtype=torch.float64)
 
-        actual = calculate_loss(k, n, pi, mu, phi).item()
+        actual = calculate_betabinom_loss(k, n, pi, mu, phi).item()
 
         alpha = mu.numpy() * phi.item()
         beta = (1.0 - mu.numpy()) * phi.item()
@@ -49,7 +49,7 @@ class BetaBinomialLossTests(unittest.TestCase):
         mu = torch.tensor([0.10, 0.25, 0.50], requires_grad=True)
         phi = torch.tensor(2.0, requires_grad=True)
 
-        loss = calculate_loss(k, n, pi, mu, phi)
+        loss = calculate_betabinom_loss(k, n, pi, mu, phi)
         loss.backward()
 
         self.assertEqual(loss.shape, torch.Size([]))
@@ -57,6 +57,43 @@ class BetaBinomialLossTests(unittest.TestCase):
         for parameter in (pi, mu, phi):
             self.assertIsNotNone(parameter.grad)
             self.assertTrue(torch.isfinite(parameter.grad).all())
+
+    def test_weighted_loss_is_weighted_mean_of_per_example_losses(self):
+        k = torch.tensor([0.0, 2.0, 7.0], dtype=torch.float64)
+        n = torch.tensor([10.0, 10.0, 12.0], dtype=torch.float64)
+        pi = torch.tensor([0.75, 0.40, 0.05], dtype=torch.float64)
+        mu = torch.tensor([0.10, 0.25, 0.60], dtype=torch.float64)
+        phi = torch.tensor(4.0, dtype=torch.float64)
+        weights = torch.tensor([1.0, 2.0, 8.0], dtype=torch.float64)
+
+        actual = calculate_betabinom_loss(
+            k, n, pi, mu, phi, sample_weight=weights
+        )
+        individual_losses = torch.stack([
+            calculate_betabinom_loss(
+                k[i:i + 1],
+                n[i:i + 1],
+                pi[i:i + 1],
+                mu[i:i + 1],
+                phi,
+            )
+            for i in range(len(k))
+        ])
+        expected = (individual_losses * weights).sum() / weights.sum()
+
+        torch.testing.assert_close(actual, expected)
+
+    def test_weighted_loss_rejects_zero_total_weight(self):
+        values = torch.tensor([0.0, 1.0])
+        with self.assertRaisesRegex(ValueError, "positive sum"):
+            calculate_betabinom_loss(
+                k=values,
+                n=torch.ones_like(values),
+                pi=torch.full_like(values, 0.5),
+                mu=torch.full_like(values, 0.5),
+                phi=torch.tensor(1.0),
+                sample_weight=torch.zeros_like(values),
+            )
 
 
 if __name__ == "__main__":

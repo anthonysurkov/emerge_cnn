@@ -4,13 +4,19 @@ from tqdm import tqdm
 from pathlib import Path
 
 from .losses import calculate_betabinom_loss
-from .truth import EmergeCNNPaths, EmergeDataset, load_train_val
+from .truth import (
+    EmergeCNNPaths,
+    EmergeDataset,
+    frequency_tempered_weights,
+    load_train_val,
+)
 from .model import ConvModelFramework
 from .metadata import get_model_config, get_training_config, get_data_config
 
 
 TRAIN_BATCH_SIZE = 1024
 VAL_BATCH_SIZE = 4096
+TAIL_WEIGHT_POWER = 0.25
 
 
 def check_finite_gradients(model: torch.nn.Module) -> None:
@@ -56,7 +62,8 @@ def train_one_epoch(
             batch["n"],
             forward["pi"],
             forward["mu"],
-            forward["phi"]
+            forward["phi"],
+            sample_weight=batch.get("loss_weight")
         )
         if not torch.isfinite(loss).item():
             raise FloatingPointError(
@@ -67,9 +74,15 @@ def train_one_epoch(
         check_finite_gradients(model)
         optimizer.step()
 
+        loss_weight = batch.get("loss_weight")
+        loss_normalizer = (
+            loss_weight.sum().item()
+            if loss_weight is not None
+            else batch["sequence"].shape[0]
+        )
         losses.append({
-            "loss": loss.item() * batch["sequence"].shape[0],
-            "length": batch["sequence"].shape[0]
+            "loss": loss.item() * loss_normalizer,
+            "length": loss_normalizer
         })
         progress.set_postfix(loss=f"{loss.item():.4f}")
 
@@ -137,6 +150,7 @@ def fit_model(
     checkpoint_path: str = "data/best_model.pt",
     patience: int = 5,
     min_delta: float = 1e-4,
+    tail_weight_power: float = 0.0,
     verbose: bool = True
 ) -> list[dict]:
     best_val_loss = float("inf")
@@ -177,7 +191,8 @@ def fit_model(
                     seed=seed,
                     max_epochs=max_epochs,
                     patience=patience,
-                    min_delta=min_delta
+                    min_delta=min_delta,
+                    tail_weight_power=tail_weight_power,
                 ),
                 "data_config": get_data_config(
                     paths=paths,
@@ -219,6 +234,7 @@ def train_model(
     patience: int = 5,
     min_delta: float = 1e-4,
     seed: int = 42,
+    tail_weight_power: float = TAIL_WEIGHT_POWER,
     verbose: bool = True
 ) -> list[dict]:
     if torch.cuda.is_available():
@@ -233,7 +249,14 @@ def train_model(
 
     generator = torch.Generator()
     generator.manual_seed(seed)
-    train_data = EmergeDataset(df=train_df)
+    train_loss_weights = frequency_tempered_weights(
+        train_df["mle"],
+        power=tail_weight_power
+    )
+    train_data = EmergeDataset(
+        df=train_df,
+        loss_weights=train_loss_weights
+    )
     val_data = EmergeDataset(df=val_df)
     train_loader = torch.utils.data.DataLoader(
         train_data,
@@ -265,6 +288,7 @@ def train_model(
         checkpoint_path=checkpoint_path,
         patience=patience,
         min_delta=min_delta,
+        tail_weight_power=tail_weight_power,
         verbose=verbose
     )
 

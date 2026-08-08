@@ -4,7 +4,12 @@ from typing import Any
 import torch
 from torch.utils.data import DataLoader
 
-from .truth import EmergeCNNPaths, NO_EDITING_CUTOFF, SPLITS_SEED
+from .truth import (
+    EDITING_STRATUM_UPPER_BOUNDS,
+    EmergeCNNPaths,
+    NO_EDITING_CUTOFF,
+    SPLITS_SEED,
+)
 
 
 def _as_list(value: int | tuple[int, ...]) -> list[int]:
@@ -57,6 +62,7 @@ def get_training_config(
     max_epochs: int,
     patience: int,
     min_delta: float,
+    tail_weight_power: float,
 ) -> dict[str, Any]:
     return {
         "seed": seed,
@@ -71,6 +77,8 @@ def get_training_config(
         "max_epochs": max_epochs,
         "patience": patience,
         "min_delta": min_delta,
+        "tail_weight_power": tail_weight_power,
+        "editing_stratum_upper_bounds": list(EDITING_STRATUM_UPPER_BOUNDS),
     }
 
 def get_data_config(

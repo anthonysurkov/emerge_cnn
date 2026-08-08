@@ -28,7 +28,8 @@ def calculate_betabinom_loss(
     n: torch.Tensor,
     pi: torch.Tensor,
     mu: torch.Tensor,
-    phi: torch.Tensor
+    phi: torch.Tensor,
+    sample_weight: torch.Tensor | None = None
 ) -> torch.Tensor:
     pi = pi.clamp(min=1e-6, max=1-1e-6)
 
@@ -44,4 +45,19 @@ def calculate_betabinom_loss(
         zero_logprob,
         log_bb_component
     )
-    return -observation_logprob.mean()
+    per_example_loss = -observation_logprob
+
+    if sample_weight is None:
+        return per_example_loss.mean()
+
+    if sample_weight.shape != per_example_loss.shape:
+        raise ValueError("sample_weight must match the per-example loss shape")
+    if not torch.isfinite(sample_weight).all().item():
+        raise ValueError("sample_weight must contain only finite values")
+    if (sample_weight < 0).any().item():
+        raise ValueError("sample_weight must be nonnegative")
+
+    weight_sum = sample_weight.sum()
+    if weight_sum.item() <= 0:
+        raise ValueError("sample_weight must have a positive sum")
+    return (sample_weight * per_example_loss).sum() / weight_sum

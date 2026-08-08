@@ -15,7 +15,7 @@ TRAIN_BATCH_SIZE = 256
 VAL_BATCH_SIZE   = 128
 
 # Naming
-MODEL_NAME = "splithidden"
+MODEL_NAME = "twoconv_sharedhidden"
 
 
 from .model import OneHotFeats, OneLayerConv, DenseHeads
@@ -34,10 +34,10 @@ def assemble_baseline_model() -> torch.nn.Module:
     )
 
 from .model import OneHotFeats, TwoLayerConv, DenseHeads
-TWOCONV_NUM_FILTERS_LAYER_ONE = 16
-TWOCONV_NUM_FILTERS_LAYER_TWO = 64
+TWOCONV_NUM_FILTERS_LAYER_ONE = 32
+TWOCONV_NUM_FILTERS_LAYER_TWO = 128
 TWOCONV_KERNEL_SIZE_LAYER_ONE = 3
-TWOCONV_KERNEL_SIZE_LAYER_TWO = 4
+TWOCONV_KERNEL_SIZE_LAYER_TWO = 6
 def assemble_twoconv_model() -> torch.nn.Module:
     return ConvModelFramework(
         encoder_block=OneHotFeats(),
@@ -75,6 +75,29 @@ def assemble_sharedhidden_model() -> torch.nn.Module:
                 * (SEQ_LENGTH - SHAREDHIDDEN_KERNEL_SIZE + 1)
             ),
             hidden_size=SHAREDHIDDEN_HIDDEN_SIZE
+        ),
+        phi_init=PHI_INIT
+    )
+
+from .model import OneHotFeats, OneLayerConv, TwoSharedHidden
+TWOSHAREDHIDDEN_NUM_FILTERS = 64
+TWOSHAREDHIDDEN_KERNEL_SIZE = 6
+TWOSHAREDHIDDEN_HIDDEN_ONE = 32
+TWOSHAREDHIDDEN_HIDDEN_TWO = 32
+def assemble_twosharedhidden_model() -> torch.nn.Module:
+    return ConvModelFramework(
+        encoder_block=OneHotFeats(),
+        conv_block=OneLayerConv(
+            num_filters=TWOSHAREDHIDDEN_NUM_FILTERS,
+            kernel_size=TWOSHAREDHIDDEN_KERNEL_SIZE
+        ),
+        heads_block=TwoSharedHidden(
+            input_size=(
+                TWOSHAREDHIDDEN_NUM_FILTERS
+                * (SEQ_LENGTH - TWOSHAREDHIDDEN_KERNEL_SIZE + 1)
+            ),
+            hidden_size_one=TWOSHAREDHIDDEN_HIDDEN_ONE,
+            hidden_size_two=TWOSHAREDHIDDEN_HIDDEN_TWO
         ),
         phi_init=PHI_INIT
     )
@@ -179,6 +202,16 @@ def main(model_assembler: Callable):
             f"_h{TWOC_SHAREDH_HIDDEN_SIZE}"
             f"_ckpt.pt"
         )
+    elif MODEL_NAME == "twosharedhidden":
+        ckpt_path = (
+            f"{DATA_DIR}/{MODEL_NAME}_model"
+            f"_k{TWOSHAREDHIDDEN_KERNEL_SIZE}"
+            f"_f{TWOSHAREDHIDDEN_NUM_FILTERS}"
+            f"_h1{TWOSHAREDHIDDEN_HIDDEN_ONE}"
+            f"_h2{TWOSHAREDHIDDEN_HIDDEN_TWO}"
+            f"_ckpt.pt"
+        )
+
     else:
         raise ValueError(
             "Model name does not correspond to registered models"
