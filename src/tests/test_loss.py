@@ -42,6 +42,17 @@ class BetaBinomialLossTests(unittest.TestCase):
 
         self.assertAlmostEqual(actual, expected, places=10)
 
+    def test_one_head_loss_is_plain_beta_binomial(self):
+        k = torch.tensor([0.0, 2.0, 7.0], dtype=torch.float64)
+        n = torch.tensor([10.0, 10.0, 12.0], dtype=torch.float64)
+        mu = torch.tensor([0.10, 0.25, 0.60], dtype=torch.float64)
+        phi = torch.tensor(4.0, dtype=torch.float64)
+
+        actual = calculate_betabinom_loss(k, n, None, mu, phi)
+        expected = -betabinom_logprob(k, n, mu, phi).mean()
+
+        torch.testing.assert_close(actual, expected)
+
     def test_loss_backpropagates_to_all_parameters(self):
         k = torch.tensor([0.0, 1.0, 3.0])
         n = torch.tensor([10.0, 10.0, 12.0])

@@ -67,7 +67,7 @@ def train_one_epoch(
         loss = calculate_betabinom_loss(
             batch["k"],
             batch["n"],
-            forward["pi"],
+            forward.get("pi"),
             forward["mu"],
             forward["phi"],
             sample_weight=batch.get("loss_weight")
@@ -133,7 +133,7 @@ def val_one_epoch(
             loss = calculate_betabinom_loss(
                 batch["k"],
                 batch["n"],
-                forward["pi"],
+                forward.get("pi"),
                 forward["mu"],
                 forward["phi"]
             )

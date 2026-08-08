@@ -7,12 +7,14 @@ from src.model import (
     ConvLayerSpec,
     ConvModelFramework,
     ModelSpec,
+    OneHeadSpec,
     SharedHeadSpec,
     SplitHeadSpec,
     build_model,
 )
 from src.blocks import (
     ConvStack,
+    OneHead,
     SplitHidden,
     SharedHidden,
 )
@@ -44,6 +46,30 @@ class CheckpointLoadingTests(unittest.TestCase):
             heads=SplitHeadSpec(pi_hidden_size=32, mu_hidden_size=16),
         ))
         self.assert_checkpoint_round_trip(model)
+
+    def test_reconstructs_one_head_model(self):
+        model = build_model(ModelSpec(
+            preset_id="test-one-head",
+            conv_layers=(
+                ConvLayerSpec(filters=16, kernel_size=3),
+                ConvLayerSpec(filters=64, kernel_size=4),
+            ),
+            heads=OneHeadSpec(hidden_size=24),
+        ))
+
+        self.assertIs(type(model.heads_block), OneHead)
+        self.assert_checkpoint_round_trip(model)
+
+        config = get_model_config(model)
+        self.assertEqual(config["heads_class"], OneHead.__name__)
+        self.assertEqual(
+            config["heads"],
+            {"input_size": 320, "hidden_size": 24},
+        )
+
+        output = model(torch.zeros((2, 10), dtype=torch.long))
+        self.assertEqual(set(output), {"mu", "phi"})
+        self.assertEqual(output["mu"].shape, (2,))
 
     def test_reconstructs_two_layer_shared_hidden_model(self):
         model = build_model(ModelSpec(

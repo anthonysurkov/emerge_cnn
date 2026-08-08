@@ -10,7 +10,6 @@ from sklearn.model_selection import KFold
 from .paths import DATA_DIR
 
 
-NO_EDITING_CUTOFF = 0.05
 SEED = 42
 SPLITS_SEED = 42
 NT_MAP = {"A": 0, "C": 1, "G": 2, "U": 3, "T": 3}
@@ -123,11 +122,11 @@ def make_splits(
         )
         return train.index, val.index, test.index
 
-    pos = split_df(df[df["mle"] > NO_EDITING_CUTOFF])
-    zer = split_df(df[df["mle"] <= NO_EDITING_CUTOFF])
-    train_idx = pos[0].append(zer[0])
-    val_idx = pos[1].append(zer[1])
-    test_idx = pos[2].append(zer[2])
+    nonzero = split_df(df[df["k"] > 0])
+    zero = split_df(df[df["k"] == 0])
+    train_idx = nonzero[0].append(zero[0])
+    val_idx = nonzero[1].append(zero[1])
+    test_idx = nonzero[2].append(zero[2])
 
     rng = np.random.default_rng(splits_seed)
     train_idx = pd.Index(rng.permutation(train_idx))

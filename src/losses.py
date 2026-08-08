@@ -26,25 +26,27 @@ def betabinom_logprob(
 def calculate_betabinom_loss(
     k: torch.Tensor,
     n: torch.Tensor,
-    pi: torch.Tensor,
+    pi: torch.Tensor | None,
     mu: torch.Tensor,
     phi: torch.Tensor,
     sample_weight: torch.Tensor | None = None
 ) -> torch.Tensor:
-    pi = pi.clamp(min=1e-6, max=1-1e-6)
-
     bb_logprob = betabinom_logprob(k, n, mu, phi)
-    log_bb_component = torch.log1p(-pi) + bb_logprob
-    zero_logprob = torch.logaddexp(
-        torch.log(pi),
-        log_bb_component
-    )
+    if pi is None:
+        observation_logprob = bb_logprob
+    else:
+        pi = pi.clamp(min=1e-6, max=1-1e-6)
+        log_bb_component = torch.log1p(-pi) + bb_logprob
+        zero_logprob = torch.logaddexp(
+            torch.log(pi),
+            log_bb_component
+        )
 
-    observation_logprob = torch.where(
-        k == 0,
-        zero_logprob,
-        log_bb_component
-    )
+        observation_logprob = torch.where(
+            k == 0,
+            zero_logprob,
+            log_bb_component
+        )
     per_example_loss = -observation_logprob
 
     if sample_weight is None:

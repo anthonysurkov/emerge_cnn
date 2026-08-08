@@ -98,6 +98,26 @@ class DenseHeads(torch.nn.Module):
         return {"pi": pi, "mu": mu}
 
 
+class OneHead(torch.nn.Module):
+    def __init__(self, input_size: int, hidden_size: int):
+        super().__init__()
+        self.config = {
+            "input_size": input_size,
+            "hidden_size": hidden_size
+        }
+        self.hidden = torch.nn.Sequential(
+            torch.nn.Linear(input_size, hidden_size),
+            torch.nn.ReLU()
+        )
+        self.head = torch.nn.Linear(hidden_size, 1)
+        self.activation = torch.nn.Sigmoid()
+
+    def forward(self, filters: torch.Tensor) -> dict:
+        hidden = self.hidden(filters)
+        mu = self.activation(self.head(hidden)).squeeze(-1)
+        return {"mu": mu}
+
+
 class SharedHidden(torch.nn.Module):
     def __init__(self, input_size: int, hidden_size: int):
         super().__init__()
@@ -105,7 +125,6 @@ class SharedHidden(torch.nn.Module):
             "input_size": input_size,
             "hidden_size": hidden_size
         }
-
         self.hidden = torch.nn.Sequential(
             torch.nn.Linear(input_size, hidden_size),
             torch.nn.ReLU()

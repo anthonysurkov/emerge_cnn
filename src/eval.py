@@ -65,7 +65,10 @@ def append_model_preds(
                 mu=pred["mu"],
                 phi=pred["phi"]
             ).exp()
-            nonzero_prob = (1.0 - pred["pi"]) * (1.0 - bb_zero_prob)
+            pi = pred.get("pi")
+            nonzero_prob = 1.0 - bb_zero_prob
+            if pi is not None:
+                nonzero_prob = (1.0 - pi) * nonzero_prob
 
             outputs["nonzero_prob"].append(nonzero_prob.cpu())
             outputs["mu"].append(pred["mu"].cpu())

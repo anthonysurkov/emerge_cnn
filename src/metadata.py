@@ -8,7 +8,6 @@ from .blocks import ConvStack
 from .truth import (
     EDITING_STRATUM_UPPER_BOUNDS,
     EmergeCNNPaths,
-    NO_EDITING_CUTOFF,
     SPLITS_SEED,
 )
 
@@ -95,7 +94,6 @@ def get_data_config(
     paths: EmergeCNNPaths,
     *,
     split_seed: int = SPLITS_SEED,
-    no_editing_cutoff: float = NO_EDITING_CUTOFF,
 ) -> dict[str, Any]:
     def path_string(path: Path) -> str:
         return str(path.resolve())
@@ -107,5 +105,5 @@ def get_data_config(
         "val_split_path": path_string(paths.val_path),
         "test_split_path": path_string(paths.test_path),
         "split_seed": split_seed,
-        "no_editing_cutoff": no_editing_cutoff,
+        "split_zero_definition": "k == 0",
     }

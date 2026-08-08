@@ -6,6 +6,7 @@ from .blocks import (
     ConvModelFramework,
     ConvStack,
     DenseHeads,
+    OneHead,
     OneHotFeats,
     SharedHidden,
     SplitHidden
@@ -15,6 +16,8 @@ from .blocks import (
 def serialize_head(spec) -> dict:
     if isinstance(spec, DirectHeadSpec):
         return {"type": "direct"}
+    if isinstance(spec, OneHeadSpec):
+        return {"type": "one", "hidden_size": spec.hidden_size}
     if isinstance(spec, SharedHeadSpec):
         return {"type": "shared", "hidden_size": spec.hidden_size}
     if isinstance(spec, SplitHeadSpec):
@@ -34,6 +37,10 @@ class DirectHeadSpec:
     pass
 
 @dataclass(frozen=True)
+class OneHeadSpec:
+    hidden_size: int
+
+@dataclass(frozen=True)
 class SharedHeadSpec:
     hidden_size: int
 
@@ -42,7 +49,7 @@ class SplitHeadSpec:
     pi_hidden_size: int
     mu_hidden_size: int
 
-HeadSpec = DirectHeadSpec | SharedHeadSpec | SplitHeadSpec
+HeadSpec = DirectHeadSpec | SharedHeadSpec | SplitHeadSpec | OneHeadSpec
 
 
 @dataclass(frozen=True)
@@ -90,6 +97,11 @@ def build_model(spec: ModelSpec) -> ConvModelFramework:
             hidden_size_pi=spec.heads.pi_hidden_size,
             hidden_size_mu=spec.heads.mu_hidden_size
         )
+    elif isinstance(spec.heads, OneHeadSpec):
+        heads = OneHead(
+            input_size=input_size,
+            hidden_size=spec.heads.hidden_size
+        )
     else:
         raise TypeError(f"Unsupported head: {spec.heads!r}")
 
@@ -102,6 +114,22 @@ def build_model(spec: ModelSpec) -> ConvModelFramework:
 
 
 # PRESETS
+
+def config_conv2_onehead(
+    f1: int,
+    k1: int,
+    f2: int,
+    k2: int,
+    h: int
+) -> ModelSpec:
+    return ModelSpec(
+        preset_id = f"conv2-f1-{f1}-k1-{k1}-f2-{f2}-k2-{k2}-onehead-{h}",
+        conv_layers=(
+            ConvLayerSpec(filters=f1, kernel_size=k1),
+            ConvLayerSpec(filters=f2, kernel_size=k2)
+        ),
+        heads=OneHeadSpec(hidden_size=h)
+    )
 
 def config_conv2_sharedmlp(
     f1: int,
