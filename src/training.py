@@ -1,22 +1,83 @@
+import multiprocessing
+from concurrent.futures import ProcessPoolExecutor
+from pathlib import Path
+
 import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from pathlib import Path
 
 from .losses import calculate_betabinom_loss
 from .truth import (
     EmergeCNNPaths,
     EmergeDataset,
     frequency_tempered_weights,
-    load_train_val
+    load_train_val,
+    set_seed
 )
-from .model import ConvModelFramework
+from .model import ConvModelFramework, ModelSpec, build_model
 from .metadata import get_model_config, get_training_config, get_data_config
 
 
 TRAIN_BATCH_SIZE = 1024
 VAL_BATCH_SIZE = 4096
-TAIL_WEIGHT_POWER = 0.25
+
+
+def _configure_training_worker(progress_lock) -> None:
+    tqdm.set_lock(progress_lock)
+
+def _train_spec(
+    spec: ModelSpec,
+    checkpoint_path: Path,
+    tail_weight_power: float,
+    agent_id: int
+) -> int:
+    label = f"agent {agent_id}"
+    tqdm.write(f"[{label}] starting {spec.preset_id}")
+    set_seed()
+    training_history = train_model(
+        model=build_model(spec=spec),
+        checkpoint_path=checkpoint_path,
+        tail_weight_power=tail_weight_power,
+        progress_label=label,
+        progress_position=agent_id - 1
+    )
+    tqdm.write(
+        f"[{label}] finished {spec.preset_id} "
+        f"after {len(training_history)} epochs"
+    )
+    return len(training_history)
+
+def _train_specs_in_subprocesses(
+    specs: list[ModelSpec],
+    checkpoint_paths: list[Path],
+    tail_weight_power: float,
+    max_workers: int
+) -> list[int]:
+    if max_workers < 1:
+        raise ValueError("max_workers must be positive")
+
+    context = multiprocessing.get_context("spawn")
+    progress_lock = context.RLock()
+    with ProcessPoolExecutor(
+        max_workers=max_workers,
+        mp_context=context,
+        initializer=_configure_training_worker,
+        initargs=(progress_lock,)
+    ) as executor:
+        futures = [
+            executor.submit(
+                _train_spec,
+                spec,
+                checkpoint_path,
+                tail_weight_power,
+                agent_id
+            )
+            for agent_id, (spec, checkpoint_path) in enumerate(
+                zip(specs, checkpoint_paths),
+                start=1
+            )
+        ]
+        return [future.result() for future in futures]
 
 
 def check_finite_gradients(model: torch.nn.Module) -> None:
@@ -258,7 +319,7 @@ def train_model(
     patience: int = 5,
     min_delta: float = 1e-4,
     seed: int = 42,
-    tail_weight_power: float = TAIL_WEIGHT_POWER,
+    tail_weight_power: float = 0.25
     verbose: bool = True,
     progress_label: str | None = None,
     progress_position: int = 0

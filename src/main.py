@@ -1,74 +1,11 @@
-import multiprocessing
-from concurrent.futures import ProcessPoolExecutor
-from pathlib import Path
 from pprint import pprint
 from typing import Any
 
-from tqdm import tqdm
-
 from .truth import set_seed
-from .training import TAIL_WEIGHT_POWER, train_model
-from .model import ModelSpec, scanconfig_conv2_sharedmlp, build_model
+from .training import TAIL_WEIGHT_POWER, _train_specs_in_subprocesses
+from .model import scanconfig_conv2_sharedmlp
 from .eval import eval_main
 from .paths import DATA_DIR
-
-
-def _configure_training_worker(progress_lock) -> None:
-    tqdm.set_lock(progress_lock)
-
-def _train_spec(
-    spec: ModelSpec,
-    checkpoint_path: Path,
-    tail_weight_power: float,
-    agent_id: int
-) -> int:
-    label = f"agent {agent_id}"
-    tqdm.write(f"[{label}] starting {spec.preset_id}")
-    set_seed()
-    training_history = train_model(
-        model=build_model(spec=spec),
-        checkpoint_path=checkpoint_path,
-        tail_weight_power=tail_weight_power,
-        progress_label=label,
-        progress_position=agent_id - 1
-    )
-    tqdm.write(
-        f"[{label}] finished {spec.preset_id} "
-        f"after {len(training_history)} epochs"
-    )
-    return len(training_history)
-
-def _train_specs_in_subprocesses(
-    specs: list[ModelSpec],
-    checkpoint_paths: list[Path],
-    tail_weight_power: float,
-    max_workers: int
-) -> list[int]:
-    if max_workers < 1:
-        raise ValueError("max_workers must be positive")
-
-    context = multiprocessing.get_context("spawn")
-    progress_lock = context.RLock()
-    with ProcessPoolExecutor(
-        max_workers=max_workers,
-        mp_context=context,
-        initializer=_configure_training_worker,
-        initargs=(progress_lock,)
-    ) as executor:
-        futures = [
-            executor.submit(
-                _train_spec,
-                spec,
-                checkpoint_path,
-                tail_weight_power,
-                agent_id
-            )
-            for agent_id, (spec, checkpoint_path) in enumerate(
-                zip(specs, checkpoint_paths),
-                start=1
-            )
-        ]
-        return [future.result() for future in futures]
 
 def scan_conv2_sharedmlp(
     f1_range: list[int],

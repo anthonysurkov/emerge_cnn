@@ -2,15 +2,16 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from src.main import _train_spec, scan_conv2_sharedmlp
+from src.main import scan_conv2_sharedmlp
 from src.model import config_conv2_sharedmlp
+from src.training import _train_spec, _train_specs_in_subprocesses
 
 
 class MainScanTests(unittest.TestCase):
-    @patch("src.main.tqdm.write")
-    @patch("src.main.set_seed")
-    @patch("src.main.build_model")
-    @patch("src.main.train_model")
+    @patch("src.training.tqdm.write")
+    @patch("src.training.set_seed")
+    @patch("src.training.build_model")
+    @patch("src.training.train_model")
     def test_worker_labels_terminal_progress(
         self,
         train_model,
@@ -68,8 +69,6 @@ class MainScanTests(unittest.TestCase):
 
     def test_rejects_nonpositive_worker_count(self):
         with self.assertRaisesRegex(ValueError, "must be positive"):
-            from src.main import _train_specs_in_subprocesses
-
             _train_specs_in_subprocesses([], [], 0.25, max_workers=0)
 
 
