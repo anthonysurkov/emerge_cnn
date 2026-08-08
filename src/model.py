@@ -64,10 +64,12 @@ class DenseHeads(torch.nn.Module):
         self.config = {"input_size": input_size}
         self.pi_head = torch.nn.Linear(input_size, 1) # classifier head
         self.mu_head = torch.nn.Linear(input_size, 1) # regressor head
+        self.pi_activation = torch.nn.Sigmoid()
+        self.mu_activation = torch.nn.Sigmoid()
 
     def forward(self, filters: torch.Tensor) -> dict:
-        pi = torch.sigmoid(self.pi_head(filters)).squeeze(-1)
-        mu = torch.sigmoid(self.mu_head(filters)).squeeze(-1)
+        pi = self.pi_activation(self.pi_head(filters)).squeeze(-1)
+        mu = self.mu_activation(self.mu_head(filters)).squeeze(-1)
 
         return {"pi": pi, "mu": mu}
 
@@ -86,12 +88,50 @@ class SharedHidden(torch.nn.Module):
         )
         self.pi_head = torch.nn.Linear(hidden_size, 1)
         self.mu_head = torch.nn.Linear(hidden_size, 1)
+        self.pi_activation = torch.nn.Sigmoid()
+        self.mu_activation = torch.nn.Sigmoid()
 
     def forward(self, filters: torch.Tensor) -> dict:
         hidden = self.hidden(filters)
 
-        pi = torch.sigmoid(self.pi_head(hidden)).squeeze(-1)
-        mu = torch.sigmoid(self.mu_head(hidden)).squeeze(-1)
+        pi = self.pi_activation(self.pi_head(hidden)).squeeze(-1)
+        mu = self.mu_activation(self.mu_head(hidden)).squeeze(-1)
+
+        return {"pi": pi, "mu": mu}
+
+
+class TwoSharedHidden(torch.nn.Module):
+    def __init__(
+        self,
+        input_size: int,
+        hidden_size_one: int,
+        hidden_size_two: int
+    ):
+        super().__init__()
+        self.config = {
+            "input_size": input_size,
+            "hidden_size_one": hidden_size_one,
+            "hidden_size_two": hidden_size_two
+        }
+        self.hidden_one = torch.nn.Sequential(
+            torch.nn.Linear(input_size, hidden_size_one),
+            torch.nn.ReLU()
+        )
+        self.hidden_two = torch.nn.Sequential(
+            torch.nn.Linear(hidden_size_one, hidden_size_two),
+            torch.nn.ReLU()
+        )
+        self.pi_head = torch.nn.Linear(hidden_size_two, 1)
+        self.mu_head = torch.nn.Linear(hidden_size_two, 1)
+        self.pi_activation = torch.nn.Sigmoid()
+        self.mu_activation = torch.nn.Sigmoid()
+
+    def forward(self, filters: torch.Tensor) -> dict:
+        hidden_one = self.hidden_one(filters)
+        hidden_two = self.hidden_two(hidden_one)
+
+        pi = self.pi_activation(self.pi_head(hidden_two)).squeeze(-1)
+        mu = self.mu_activation(self.mu_head(hidden_two)).squeeze(-1)
 
         return {"pi": pi, "mu": mu}
 
@@ -120,13 +160,15 @@ class SplitHidden(torch.nn.Module):
         )
         self.pi_head = torch.nn.Linear(hidden_size_pi, 1)
         self.mu_head = torch.nn.Linear(hidden_size_mu, 1)
+        self.pi_activation = torch.nn.Sigmoid()
+        self.mu_activation = torch.nn.Sigmoid()
 
     def forward(self, filters: torch.Tensor) -> dict:
         hidden_pi = self.hidden_pi(filters)
         hidden_mu = self.hidden_mu(filters)
 
-        pi = torch.sigmoid(self.pi_head(hidden_pi)).squeeze(-1)
-        mu = torch.sigmoid(self.mu_head(hidden_mu)).squeeze(-1)
+        pi = self.pi_activation(self.pi_head(hidden_pi)).squeeze(-1)
+        mu = self.mu_activation(self.mu_head(hidden_mu)).squeeze(-1)
 
         return {"pi": pi, "mu": mu}
 
