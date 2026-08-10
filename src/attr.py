@@ -1,3 +1,5 @@
+import argparse
+
 import torch
 import numpy as np
 import pandas as pd
@@ -9,8 +11,21 @@ from modiscolite.core import Seqlet, SeqletSet
 
 from . import model
 from .modisco import tfmodisco_forward_only
-from .truth import EmergeDataset, EmergeCNNPaths, load_train_val
+from .truth import (
+    EmergeDataset,
+    EmergeCNNPaths,
+    load_stratified_kfolds,
+    load_train_val,
+)
+from .training import fold_checkpoint_paths
 from . import utils
+
+
+ATTR_BATCH_SIZE = 4096
+DEFAULT_BASE_CHECKPOINT_PATH = Path(
+    "data/"
+    "eval_conv2-f1-32-k1-4-f2-128-k2-4-onehead-32-alpha-0.25.pt"
+)
 
 
 @dataclass
@@ -30,18 +45,9 @@ class AttrModel(torch.nn.Module):
         super().__init__()
         self.model = cnn
         self.output_name = output_name
-        if isinstance(cnn.conv_block, model.TwoLayerConv):
-            self.activation_one = torch.nn.ReLU()
-            self.activation_two = torch.nn.ReLU()
 
     def forward(self, one_hot):
-        conv = self.model.conv_block
-        if isinstance(conv, model.TwoLayerConv):
-            features = self.activation_one(conv.layer_one(one_hot))
-            features = self.activation_two(conv.layer_two(features))
-            features = features.flatten(start_dim=1)
-        else:
-            features = conv(one_hot)
+        features = self.model.conv_block(one_hot)
         outputs = self.model.heads_block(features)
         return outputs[self.output_name]
 
@@ -118,7 +124,7 @@ def calc_padded_hyp(hyps: torch.Tensor, size: int) -> np.ndarray:
 def do_modisco(
     ohe: torch.Tensor,
     hyp_contribs: torch.Tensor,
-    outpath: str | None = None,
+    outpath: str | Path | None = None,
     window_size: int = 6,
     flank_size: int = 2,
     max_seqlets: int = 5000
@@ -161,6 +167,7 @@ def do_modisco(
         initial_flank_to_add=0,
         final_flank_to_add=0,
         max_seqlets_per_metacluster=max_seqlets,
+        min_overlap_while_sliding=1.0,
         nearest_neighbors_to_compute=100,
         n_leiden_runs=2,
         verbose=True
@@ -171,12 +178,12 @@ def do_modisco(
     return pos_patterns, neg_patterns
 
 def calc_hyp_batches(
-    val_loader: torch.utils.data.DataLoader,
+    data_loader: torch.utils.data.DataLoader,
     cnn: torch.nn.Module
-) -> tuple[list, list]:
-    ohe_batches = []
-    hyp_batches = []
-    for batch in val_loader:
+) -> tuple[list[torch.Tensor], list[torch.Tensor]]:
+    ohe_batches: list[torch.Tensor] = []
+    hyp_batches: list[torch.Tensor] = []
+    for batch in data_loader:
         ohe, hyp = get_attr_scores(
             model=cnn,
             sequences=batch["sequence"]
@@ -196,14 +203,26 @@ def get_seqlets_emerge(
     seqlets: list[Seqlet],
     df: pd.DataFrame
 ) -> pd.DataFrame:
-    dflet = pd.DataFrame({
-        "5to3": [decode_seqlet(s) for s in seqlets],
-        "contrib": [s.contrib_score for s in seqlets]
-    })
+    example_indices = np.fromiter(
+        (seqlet.example_idx for seqlet in seqlets),
+        dtype=np.int64,
+        count=len(seqlets)
+    )
+    if ((example_indices < 0) | (example_indices >= len(df))).any():
+        raise IndexError("Seqlet example index is outside the source dataframe")
+
+    # A seqlet's example_idx refers directly to the attributed input row. Using
+    # it avoids an RNA/DNA alphabet mismatch (U in EMERGe data versus T in
+    # TF-MoDISco's decoded sequence) and also handles reverse-complemented
+    # seqlets without changing the source guide identity.
+    dflet = df.iloc[example_indices].copy()
+    dflet["contrib"] = [
+        float(np.sum(seqlet.contrib_scores))
+        for seqlet in seqlets
+    ]
     return (
-        df.merge(seqlet_df, on="5to3", how="innfer")
-          .sort_values("contrib", ascending=False)
-          .reset_index(drop=True)
+        dflet.sort_values("contrib", ascending=False)
+             .reset_index(drop=True)
     )
 
 def process_modisco_patterns(
@@ -221,31 +240,24 @@ def process_modisco_patterns(
         for i, pattern in enumerate(patterns)
     ]
 
-def attr_main(
-    checkpoint_path: str,
-    outpath: str | None = None,
+def attr_one(
+    checkpoint_path: str | Path,
+    outpath: str | Path | None = None,
     screen_name: str = "r255x"
 ) -> tuple[list[ModiscoCluster], list[ModiscoCluster]]:
-    device = utils.get_device()
-
-    checkpoint = torch.load(
-        checkpoint_path,
-        map_location="cpu",
-        weights_only=False
-    )
-
     paths = EmergeCNNPaths(screen_name=screen_name)
     _, val_df = load_train_val(paths)
     val_loader = torch.utils.data.DataLoader(
         EmergeDataset(val_df),
-        batch_size=4096,
+        batch_size=ATTR_BATCH_SIZE,
         shuffle=False
     )
 
-    cnn = utils.model_from_checkpoint(checkpoint)
-    cnn.to(device)
+    cnn, _ = utils.load_model(checkpoint_path)
 
     ohe_batches, hyp_batches = calc_hyp_batches(val_loader, cnn)
+    if not ohe_batches:
+        raise ValueError("Cannot compute attributions for an empty dataset")
     ohe = torch.cat(ohe_batches)
     hyp_contribs = torch.cat(hyp_batches)
 
@@ -266,12 +278,212 @@ def attr_main(
     )
     return pos_clusts, neg_clusts
 
+def _get_reference_mu(
+    cnn: torch.nn.Module,
+    sequence_length: int = 10
+) -> float:
+    cnn.eval()
 
-if __name__ == "__main__":
-    clusts, _ = attr_main(
-        checkpoint_path=(
-            "data/current_best/"
-            "twoconv_sharedhidden_model_k13_k24_f116_f264_h32_ckpt.pt"
+    parameter = next(cnn.parameters())
+    baseline = torch.full(
+        (1, 4, sequence_length),
+        0.25,
+        device=parameter.device,
+        dtype=parameter.dtype
+    )
+    attr_model = AttrModel(cnn, output_name="mu")
+
+    with torch.inference_mode():
+        reference_mu = attr_model(baseline).item()
+
+    if not np.isfinite(reference_mu) or reference_mu <= 1e-8:
+        raise ValueError(
+            f"Ref mu too small for normalization: {reference_mu}"
+        )
+
+    return reference_mu
+
+def attr_kfolds(
+    base_checkpoint_path: str | Path,
+    base_out_path: str | Path | None = None,
+    screen_name: str = "r255x",
+    *,
+    n_splits: int = 10,
+    sequence_length: int = 10
+) -> tuple[list[ModiscoCluster], list[ModiscoCluster]]:
+    if n_splits < 2:
+        raise ValueError("n_splits must be at least 2")
+    if sequence_length < 1:
+        raise ValueError("sequence_length must be positive")
+
+    paths = EmergeCNNPaths(screen_name=screen_name)
+    screen_df = pd.read_csv(
+        paths.screen_path,
+        usecols=["5to3", "n", "k", "mle"]
+    )
+    sequence_lengths = screen_df["5to3"].str.len()
+    if not sequence_lengths.eq(sequence_length).all():
+        raise ValueError(
+            "All attribution sequences must have length "
+            f"{sequence_length}"
+        )
+    if screen_df.empty:
+        raise ValueError("Cannot compute attributions for an empty dataset")
+
+    folds = load_stratified_kfolds(
+        paths=paths,
+        n_splits=n_splits
+    )
+    ohe: torch.Tensor | None = None
+    normalized_hyp: torch.Tensor | None = None
+    attributed = torch.zeros(len(screen_df), dtype=torch.bool)
+
+    checkpoint_paths = fold_checkpoint_paths(
+        base_checkpoint_path,
+        n_splits=n_splits
+    )
+    for (_, val_df), checkpoint_path in zip(
+        folds,
+        checkpoint_paths,
+        strict=True
+    ):
+        cnn, checkpoint = utils.load_model(checkpoint_path)
+        reference_mu = _get_reference_mu(
+            cnn,
+            sequence_length=sequence_length
+        )
+        val_loader = torch.utils.data.DataLoader(
+            EmergeDataset(val_df),
+            batch_size=ATTR_BATCH_SIZE,
+            shuffle=False
+        )
+        val_indices = torch.tensor(
+            val_df.index.to_numpy(),
+            dtype=torch.long
+        )
+        offset = 0
+        for batch in val_loader:
+            fold_ohe, fold_hyp = get_attr_scores(
+                model=cnn,
+                sequences=batch["sequence"]
+            )
+            fold_ohe = fold_ohe.detach().cpu()
+            fold_hyp = fold_hyp.detach().cpu()
+            batch_end = offset + len(fold_ohe)
+
+            if ohe is None:
+                attribution_shape = (
+                    len(screen_df),
+                    fold_ohe.shape[1],
+                    fold_ohe.shape[2]
+                )
+                ohe = torch.empty(
+                    attribution_shape,
+                    dtype=fold_ohe.dtype
+                )
+                normalized_hyp = torch.zeros(
+                    attribution_shape,
+                    dtype=fold_hyp.dtype
+                )
+
+            batch_indices = val_indices[offset:batch_end]
+            if attributed[batch_indices].any():
+                raise RuntimeError(
+                    "A sequence appears in more than one validation fold"
+                )
+
+            ohe[batch_indices] = fold_ohe
+            normalized_hyp[batch_indices] = fold_hyp / reference_mu
+            attributed[batch_indices] = True
+            offset = batch_end
+
+        if offset != len(val_df):
+            raise RuntimeError(
+                f"Attributed {offset} of {len(val_df)} fold sequences"
+            )
+
+        del cnn, checkpoint
+
+    if ohe is None or normalized_hyp is None:
+        raise RuntimeError("No fold attributions were computed")
+    if not attributed.all():
+        missing = int((~attributed).sum().item())
+        raise RuntimeError(
+            f"Validation folds did not cover {missing} sequences"
+        )
+
+    pos_patterns, neg_patterns = do_modisco(
+        ohe=ohe,
+        hyp_contribs=normalized_hyp,
+        outpath=base_out_path
+    )
+    pos_clusts = process_modisco_patterns(
+        patterns=pos_patterns,
+        df=screen_df,
+        id_prefix="c"
+    )
+    neg_clusts = process_modisco_patterns(
+        patterns=neg_patterns,
+        df=screen_df,
+        id_prefix="n"
+    )
+    return pos_clusts, neg_clusts
+
+
+def _build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Compute held-out DeepLIFT attributions across model folds and "
+            "cluster them with TF-MoDISco."
         )
     )
-    print(clusts)
+    parser.add_argument(
+        "checkpoint",
+        nargs="?",
+        type=Path,
+        default=DEFAULT_BASE_CHECKPOINT_PATH,
+        help=(
+            "base checkpoint path; fold checkpoints are resolved by adding "
+            "-fold-N before the suffix"
+        )
+    )
+    parser.add_argument(
+        "--outpath",
+        type=Path,
+        help=(
+            "TF-MoDISco HDF5 output path (default: CHECKPOINT with "
+            "-modisco.h5 appended to its stem)"
+        )
+    )
+    parser.add_argument("--screen-name", default="r255x")
+    parser.add_argument("--n-splits", type=int, default=10)
+    parser.add_argument("--sequence-length", type=int, default=10)
+    return parser
+
+
+def attr_main(
+    argv: list[str] | None = None
+) -> tuple[list[ModiscoCluster], list[ModiscoCluster]]:
+    args = _build_arg_parser().parse_args(argv)
+    outpath = args.outpath or args.checkpoint.with_name(
+        f"{args.checkpoint.stem}-modisco.h5"
+    )
+    outpath.parent.mkdir(parents=True, exist_ok=True)
+
+    pos_clusters, neg_clusters = attr_kfolds(
+        base_checkpoint_path=args.checkpoint,
+        base_out_path=outpath,
+        screen_name=args.screen_name,
+        n_splits=args.n_splits,
+        sequence_length=args.sequence_length
+    )
+    print(f"Saved TF-MoDISco results to {outpath}")
+    print(
+        f"Found {len(pos_clusters)} positive and "
+        f"{len(neg_clusters)} negative clusters"
+    )
+    return pos_clusters, neg_clusters
+
+
+if __name__ == "__main__":
+    attr_main()
